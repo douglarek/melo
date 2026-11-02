@@ -81,7 +81,7 @@ func (a *app) notificationIcon(t *ytmusic.Track) []byte {
 		return nil
 	}
 	for i := 0; i < 20; i++ {
-		art := a.art.get(t.Thumbnail)
+		art := a.art.get(t.Thumbnail, artNotification)
 		if art != nil {
 			if art.failed || len(art.data) == 0 {
 				return nil

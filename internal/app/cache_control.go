@@ -32,6 +32,9 @@ func (a *app) maintenanceLoop(ctx context.Context) {
 }
 
 func (a *app) maintainCache() {
+	if a.art != nil {
+		go a.art.pruneDisk(false)
+	}
 	if a.pl == nil || a.pl.Cache == nil {
 		return
 	}

@@ -202,6 +202,47 @@ func (a *app) openMore(key string, sec ytmusic.Section) {
 	a.open(route{page: pageSection, id: key})
 }
 
+func (a *app) trackListState(key string) *ui.ListState {
+	if a.trackLists == nil {
+		a.trackLists = map[string]*ui.ListState{}
+	}
+	s := a.trackLists[key]
+	if s == nil {
+		s = &ui.ListState{}
+		a.trackLists[key] = s
+	}
+	return s
+}
+
+func (a *app) pageUsesTrackList() bool {
+	switch a.route.page {
+	case pagePlaylist, pageAlbum, pageLiked, pageArtist:
+		return true
+	case pageSearch:
+		if a.route.kind != ytmusic.SearchSongs && a.route.kind != ytmusic.SearchVideos {
+			return false
+		}
+		res := a.searches[a.route]
+		return res != nil && len(res.Tracks) > 0 &&
+			len(res.Artists) == 0 && len(res.Albums) == 0 && len(res.Playlists) == 0
+	default:
+		return false
+	}
+}
+
+func (a *app) currentTrackListState() *ui.ListState {
+	switch a.route.page {
+	case pagePlaylist:
+		return a.trackListState("playlist:" + playlistKey(a.route.id))
+	case pageAlbum:
+		return a.trackListState("album:" + a.route.id)
+	case pageLiked:
+		return a.trackListState("liked")
+	default:
+		return nil
+	}
+}
+
 func (a *app) sectionScroll(key string) *ui.ScrollState {
 	s := a.scrolled[key]
 	if s == nil {
@@ -412,9 +453,32 @@ func (a *app) viewPlaylist(c *ui.Context) {
 		tracks = a.likedTracks()
 	}
 	a.maybeLoadMorePlaylist(c)
+	a.playlistTrackList(c, pl, tracks)
+}
 
-	ui.Column(c).FillWidth().Gap(24).Children(func() {
-		// Header banner
+func (a *app) playlistTrackList(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
+	key := playlistKey(pl.ID)
+	count := 1 + len(tracks)
+	if pl.Continuation != "" {
+		count++
+	}
+	cur := a.pl.Current()
+
+	ui.List(c, a.trackListState("playlist:"+key), count).Fill().Gap(2).Rows(func(r ui.ListRow) {
+		switch {
+		case r.Index == 0:
+			a.playlistHeader(r.Context, pl, tracks)
+		case r.Index <= len(tracks):
+			a.renderTrackRow(r.Context, tracks, r.Index-1, cur)
+		default:
+			a.playlistMoreFooter(r.Context, key)
+		}
+	})
+}
+
+func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
+	p := a.pal
+	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.playlistCover(c, pl, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
@@ -442,12 +506,6 @@ func (a *app) viewPlaylist(c *ui.Context) {
 				})
 			})
 		})
-
-		// Track list table
-		a.renderTrackTable(c, tracks)
-		if pl.Continuation != "" {
-			a.playlistMoreFooter(c, playlistKey(pl.ID))
-		}
 	})
 }
 
@@ -471,9 +529,9 @@ func (a *app) playlistMoreFooter(c *ui.Context, key string) {
 }
 
 func (a *app) viewAlbum(c *ui.Context) {
-	p := a.pal
 	al := a.albums[a.route.id]
 	if al == nil {
+		p := a.pal
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
 			ui.Text(c, "正在加载专辑...").FontSize(14).TextColor(p.muted)
@@ -481,8 +539,20 @@ func (a *app) viewAlbum(c *ui.Context) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(24).Children(func() {
-		// Header banner
+	count := 1 + len(al.Tracks)
+	cur := a.pl.Current()
+	ui.List(c, a.trackListState("album:"+al.ID), count).Fill().Gap(2).Rows(func(r ui.ListRow) {
+		if r.Index == 0 {
+			a.albumHeader(r.Context, al)
+			return
+		}
+		a.renderTrackRow(r.Context, al.Tracks, r.Index-1, cur)
+	})
+}
+
+func (a *app) albumHeader(c *ui.Context, al *ytmusic.Album) {
+	p := a.pal
+	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.coverImage(c, al.Thumbnail, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
@@ -506,16 +576,13 @@ func (a *app) viewAlbum(c *ui.Context) {
 				})
 			})
 		})
-
-		// Tracks
-		a.renderTrackTable(c, al.Tracks)
 	})
 }
 
 func (a *app) viewArtist(c *ui.Context) {
-	p := a.pal
 	art := a.artists[a.route.id]
 	if art == nil {
+		p := a.pal
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
 			ui.Text(c, "正在加载音乐人资料...").FontSize(14).TextColor(p.muted)
@@ -523,8 +590,45 @@ func (a *app) viewArtist(c *ui.Context) {
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(28).Children(func() {
-		// Artist Header
+	hasAlbums := len(art.Albums) > 0
+	hasSingles := len(art.Singles) > 0
+	count := 1 + len(art.TopTracks)
+	if hasAlbums {
+		count++
+	}
+	if hasSingles {
+		count++
+	}
+
+	cur := a.pl.Current()
+	ui.List(c, a.trackListState("artist:"+art.ID), count).Fill().Gap(2).Rows(func(r ui.ListRow) {
+		idx := r.Index
+		if idx == 0 {
+			a.artistHeader(r.Context, art)
+			return
+		}
+		idx--
+		if idx < len(art.TopTracks) {
+			a.renderTrackRow(r.Context, art.TopTracks, idx, cur)
+			return
+		}
+		idx -= len(art.TopTracks)
+		if hasAlbums {
+			if idx == 0 {
+				a.artistAlbumsSection(r.Context, art)
+				return
+			}
+			idx--
+		}
+		if hasSingles {
+			a.artistSinglesSection(r.Context, art)
+		}
+	})
+}
+
+func (a *app) artistHeader(c *ui.Context, art *ytmusic.Artist) {
+	p := a.pal
+	ui.Column(c).FillWidth().Gap(24).Padding(0, 0, 20, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
 			a.coverImage(c, art.Thumbnail, 120, 60)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
@@ -542,49 +646,43 @@ func (a *app) viewArtist(c *ui.Context) {
 				})
 			})
 		})
-
-		// Top tracks
 		if len(art.TopTracks) > 0 {
 			ui.Text(c, "热门歌曲").FontSize(18).Bold().TextColor(p.text)
-			a.renderTrackTable(c, art.TopTracks)
-		}
-
-		// Discography (Albums)
-		if len(art.Albums) > 0 {
-			items := make([]ytmusic.CardItem, len(art.Albums))
-			for i, al := range art.Albums {
-				items[i] = ytmusic.CardItem{
-					ID:        al.ID,
-					Title:     al.Title,
-					Subtitle:  al.Year,
-					Thumbnail: al.Thumbnail,
-					Type:      albumCardType(al.Type),
-					Track:     al.Track,
-				}
-			}
-			a.renderSection(c, "artist-albums-"+art.ID, ytmusic.Section{Title: "专辑", Items: items})
-		}
-
-		// Singles
-		if len(art.Singles) > 0 {
-			items := make([]ytmusic.CardItem, len(art.Singles))
-			for i, sg := range art.Singles {
-				items[i] = ytmusic.CardItem{
-					ID:        sg.ID,
-					Title:     sg.Title,
-					Subtitle:  sg.Year,
-					Thumbnail: sg.Thumbnail,
-					Type:      albumCardType(sg.Type),
-					Track:     sg.Track,
-				}
-			}
-			a.renderSection(c, "artist-singles-"+art.ID, ytmusic.Section{Title: "单曲与迷你专辑", Items: items})
 		}
 	})
 }
 
+func (a *app) artistAlbumsSection(c *ui.Context, art *ytmusic.Artist) {
+	items := make([]ytmusic.CardItem, len(art.Albums))
+	for i, al := range art.Albums {
+		items[i] = ytmusic.CardItem{
+			ID:        al.ID,
+			Title:     al.Title,
+			Subtitle:  al.Year,
+			Thumbnail: al.Thumbnail,
+			Type:      albumCardType(al.Type),
+			Track:     al.Track,
+		}
+	}
+	a.renderSection(c, "artist-albums-"+art.ID, ytmusic.Section{Title: "专辑", Items: items})
+}
+
+func (a *app) artistSinglesSection(c *ui.Context, art *ytmusic.Artist) {
+	items := make([]ytmusic.CardItem, len(art.Singles))
+	for i, sg := range art.Singles {
+		items[i] = ytmusic.CardItem{
+			ID:        sg.ID,
+			Title:     sg.Title,
+			Subtitle:  sg.Year,
+			Thumbnail: sg.Thumbnail,
+			Type:      albumCardType(sg.Type),
+			Track:     sg.Track,
+		}
+	}
+	a.renderSection(c, "artist-singles-"+art.ID, ytmusic.Section{Title: "单曲与迷你专辑", Items: items})
+}
+
 func (a *app) viewLiked(c *ui.Context) {
-	p := a.pal
 	likedPlaylist := a.playlists["LM"]
 	tracks := a.likedTracks()
 	total := len(tracks)
@@ -593,7 +691,34 @@ func (a *app) viewLiked(c *ui.Context) {
 	}
 	a.maybeLoadMorePlaylist(c)
 
-	ui.Column(c).FillWidth().Gap(24).Children(func() {
+	if len(tracks) == 0 {
+		ui.Column(c).FillWidth().Gap(24).Children(func() {
+			a.likedHeader(c, likedPlaylist, tracks, total)
+			a.likedEmpty(c)
+		})
+		return
+	}
+
+	count := 1 + len(tracks)
+	if likedPlaylist != nil && likedPlaylist.Continuation != "" {
+		count++
+	}
+	cur := a.pl.Current()
+	ui.List(c, a.trackListState("liked"), count).Fill().Gap(2).Rows(func(r ui.ListRow) {
+		switch {
+		case r.Index == 0:
+			a.likedHeader(r.Context, likedPlaylist, tracks, total)
+		case r.Index <= len(tracks):
+			a.renderTrackRow(r.Context, tracks, r.Index-1, cur)
+		default:
+			a.playlistMoreFooter(r.Context, "LM")
+		}
+	})
+}
+
+func (a *app) likedHeader(c *ui.Context, likedPlaylist *ytmusic.Playlist, tracks []ytmusic.Track, total int) {
+	p := a.pal
+	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(20).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(120, 120).Radius(12).Background(p.accent).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 				ui.Icon(c, iconHeartFill).Size(48, 48).TextColor(p.onAccent)
@@ -617,98 +742,95 @@ func (a *app) viewLiked(c *ui.Context) {
 				}
 			})
 		})
+	})
+}
 
-		if len(tracks) == 0 {
-			if a.profile != nil && a.libraryLoading {
-				ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
-					ui.Spinner(c)
-					ui.Text(c, "正在从 YouTube 同步我喜欢的音乐...").FontSize(14).TextColor(p.muted)
-				})
-			} else {
-				ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
-					ui.Text(c, "暂无喜欢的音乐").FontSize(15).Bold().TextColor(p.muted)
-					ui.Text(c, "在播放歌曲时点击红心，或登录后同步 YouTube 媒体库").FontSize(13).TextColor(p.faint)
-				})
-			}
-			return
-		}
-
-		a.renderTrackTable(c, tracks)
-		if likedPlaylist != nil && likedPlaylist.Continuation != "" {
-			a.playlistMoreFooter(c, "LM")
-		}
+func (a *app) likedEmpty(c *ui.Context) {
+	p := a.pal
+	if a.profile != nil && a.libraryLoading {
+		ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
+			ui.Spinner(c)
+			ui.Text(c, "正在从 YouTube 同步我喜欢的音乐...").FontSize(14).TextColor(p.muted)
+		})
+		return
+	}
+	ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
+		ui.Text(c, "暂无喜欢的音乐").FontSize(15).Bold().TextColor(p.muted)
+		ui.Text(c, "在播放歌曲时点击红心，或登录后同步 YouTube 媒体库").FontSize(13).TextColor(p.faint)
 	})
 }
 
 func (a *app) renderTrackTable(c *ui.Context, tracks []ytmusic.Track) {
-	p := a.pal
 	cur := a.pl.Current()
-
 	ui.Column(c).FillWidth().Gap(2).Children(func() {
-		for i, track := range tracks {
-			idx := i
-			t := track
-			isPlaying := cur != nil && cur.ID == t.ID
-
-			row := ui.Row(c.Key(fmt.Sprintf("track-%s-%d", t.ID, idx))).FillWidth().Height(52).Radius(8).Padding(0, 12).AlignItems(ui.Center).Gap(14).Cursor(ui.CursorPointer).ContextMenu(a.trackCopyMenu(c, t))
-			if row.Hovered() {
-				row.Background(p.hover)
-			}
-			if row.Clicked() {
-				a.pl.SetQueue(tracks, idx)
-			}
-
-			row.Children(func() {
-				// Index or play indicator
-				ui.Box(c).Width(24).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-					if isPlaying {
-						ui.Icon(c, iconPlay).Size(14, 14).TextColor(p.accent)
-					} else {
-						ui.Text(c, fmt.Sprintf("%d", idx+1)).FontSize(13).TextColor(p.muted)
-					}
-				})
-
-				// Thumbnail
-				a.coverImage(c, t.Thumbnail, 36, 6)
-
-				// Title & artist
-				ui.Column(c).Grow(1).Gap(3).Children(func() {
-					tText := ui.Text(c, t.Title).FontSize(14)
-					if isPlaying {
-						tText.Bold().TextColor(p.accent)
-					} else {
-						tText.TextColor(p.text)
-					}
-					a.artistLinks(c, t, p.muted, p.text)
-				})
-
-				// Like button
-				liked := a.isLiked(t.ID)
-				likeLabel := "喜欢 " + t.Title
-				if liked {
-					likeLabel = "取消喜欢 " + t.Title
-				}
-				likeBtn := ui.Box(c.Key(fmt.Sprintf("like-row-%d", idx))).Label(likeLabel).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
-				if likeBtn.Clicked() {
-					a.toggleLike(t)
-					c.Invalidate()
-				}
-				likeBtn.Children(func() {
-					if liked {
-						ui.Icon(c, iconHeartFill).Size(16, 16).TextColor(p.accent)
-					} else {
-						ui.Icon(c, iconHeart).Size(16, 16).TextColor(p.faint)
-					}
-				})
-
-				// Duration
-				durStr := t.DurationString()
-				if t.DurationMs <= 0 {
-					durStr = ""
-				}
-				ui.Text(c, durStr).FontSize(12).TextColor(p.muted).Width(48)
-			})
+		for i := range tracks {
+			a.renderTrackRow(c, tracks, i, cur)
 		}
+	})
+}
+
+func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur *ytmusic.Track) {
+	p := a.pal
+	t := tracks[idx]
+	isPlaying := cur != nil && cur.ID == t.ID
+
+	row := ui.Row(c.Key(fmt.Sprintf("track-%s-%d", t.ID, idx))).FillWidth().Height(52).Radius(8).Padding(0, 12).AlignItems(ui.Center).Gap(14).Cursor(ui.CursorPointer).ContextMenu(a.trackCopyMenu(c, t))
+	if row.Hovered() {
+		row.Background(p.hover)
+	}
+	if row.Clicked() {
+		a.pl.SetQueue(tracks, idx)
+	}
+
+	row.Children(func() {
+		// Index or play indicator
+		ui.Box(c).Width(24).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			if isPlaying {
+				ui.Icon(c, iconPlay).Size(14, 14).TextColor(p.accent)
+			} else {
+				ui.Text(c, fmt.Sprintf("%d", idx+1)).FontSize(13).TextColor(p.muted)
+			}
+		})
+
+		// Thumbnail
+		a.coverImage(c, t.Thumbnail, 36, 6)
+
+		// Title & artist
+		ui.Column(c).Grow(1).Gap(3).Children(func() {
+			tText := ui.Text(c, t.Title).FontSize(14)
+			if isPlaying {
+				tText.Bold().TextColor(p.accent)
+			} else {
+				tText.TextColor(p.text)
+			}
+			a.artistLinks(c, t, p.muted, p.text)
+		})
+
+		// Like button
+		liked := a.isLiked(t.ID)
+		likeLabel := "喜欢 " + t.Title
+		if liked {
+			likeLabel = "取消喜欢 " + t.Title
+		}
+		likeBtn := ui.Box(c.Key(fmt.Sprintf("like-row-%d", idx))).Label(likeLabel).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
+		if likeBtn.Clicked() {
+			a.toggleLike(t)
+			c.Invalidate()
+		}
+		likeBtn.Children(func() {
+			if liked {
+				ui.Icon(c, iconHeartFill).Size(16, 16).TextColor(p.accent)
+			} else {
+				ui.Icon(c, iconHeart).Size(16, 16).TextColor(p.faint)
+			}
+		})
+
+		// Duration
+		durStr := t.DurationString()
+		if t.DurationMs <= 0 {
+			durStr = ""
+		}
+		ui.Text(c, durStr).FontSize(12).TextColor(p.muted).Width(48)
 	})
 }
 

@@ -50,6 +50,7 @@ type app struct {
 	win            *mygo.Window
 	pl             *player.Player
 	art            *artCache
+	artPins        map[string]bool
 	pal            palette
 	settings       settings
 	route          route
@@ -94,6 +95,7 @@ type app struct {
 	categories    map[string]*ytmusic.Category
 	more          map[string]ytmusic.Section
 	scrolled      map[string]*ui.ScrollState
+	trackLists    map[string]*ui.ListState
 	moodPages     map[string]int
 	loadingMore   map[string]bool
 	contentScroll ui.ScrollState
@@ -161,6 +163,7 @@ func Run() error {
 		categories:  map[string]*ytmusic.Category{},
 		more:        map[string]ytmusic.Section{},
 		scrolled:    map[string]*ui.ScrollState{},
+		trackLists:  map[string]*ui.ListState{},
 		moodPages:   map[string]int{},
 		loadingMore: map[string]bool{},
 		route:       route{page: pageHome},
@@ -192,7 +195,7 @@ func Run() error {
 			songCache.Prune()
 		}
 
-		a.art = newArtCache(a.post)
+		a.art = newArtCache(a.post, filepath.Join(cacheDir, "artwork"))
 		a.pl = player.New(a.post)
 		a.pl.SetContext(a.ctx)
 		a.pl.Cache = songCache
@@ -672,7 +675,12 @@ func (a *app) likedTracks() []ytmusic.Track {
 }
 
 func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
-	if a.contentScroll.MaxY <= 0 || a.contentScroll.Y < a.contentScroll.MaxY-300 {
+	if a.pageUsesTrackList() {
+		state := a.currentTrackListState()
+		if state == nil || !state.AtEnd() {
+			return
+		}
+	} else if a.contentScroll.MaxY <= 0 || a.contentScroll.Y < a.contentScroll.MaxY-300 {
 		return
 	}
 

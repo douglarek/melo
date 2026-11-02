@@ -33,6 +33,7 @@ func newTestAppAt(t *testing.T, dataDir string) *app {
 		categories:  map[string]*ytmusic.Category{},
 		more:        map[string]ytmusic.Section{},
 		scrolled:    map[string]*ui.ScrollState{},
+		trackLists:  map[string]*ui.ListState{},
 		moodPages:   map[string]int{},
 		loadingMore: map[string]bool{},
 		route:       route{page: pageHome},
@@ -44,7 +45,7 @@ func newTestAppAt(t *testing.T, dataDir string) *app {
 		return nil, errors.New("test mock offline")
 	}
 	a.pl = pl
-	a.art = newArtCache(func(fn func()) {})
+	a.art = newArtCache(func(fn func()) {}, t.TempDir())
 
 	// Populate mock catalog data for testing
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{ID: "art1", Name: "周杰伦"}}, DurationMs: 269000}

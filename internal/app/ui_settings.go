@@ -181,6 +181,9 @@ func (a *app) settingsModalView(c *ui.Context) {
 						if a.pl != nil && a.pl.Cache != nil {
 							a.pl.Cache.Clear()
 						}
+						if a.art != nil {
+							a.art.Clear()
+						}
 						a.releaseMemoryNow()
 					}
 					clearBtn.Children(func() {

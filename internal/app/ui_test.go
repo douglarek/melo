@@ -368,12 +368,82 @@ func TestMoodSectionArrowsPage(t *testing.T) {
 func TestPlaylistShowsLoadMoreFooter(t *testing.T) {
 	a := newTestApp(t)
 	a.playlists["pl1"].Continuation = "next-page"
+	a.loadingMore["pl1"] = true
 	a.route = route{page: pagePlaylist, id: "pl1"}
 
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
-	if !tt.HasText("继续向下滚动加载更多") {
+	a.trackListState("playlist:pl1").ScrollToEnd()
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("正在加载更多...") {
 		t.Fatal("playlist did not show the load-more footer")
+	}
+}
+
+func TestLargePlaylistUsesVirtualList(t *testing.T) {
+	a := newTestApp(t)
+	tracks := make([]ytmusic.Track, 500)
+	for i := range tracks {
+		tracks[i] = ytmusic.Track{ID: fmt.Sprintf("track-%d", i), Title: fmt.Sprintf("Song %d", i)}
+	}
+	a.playlists["big"] = &ytmusic.Playlist{ID: "big", Title: "Big", Tracks: tracks, TrackCount: len(tracks)}
+	a.route = route{page: pagePlaylist, id: "big"}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	first, last := a.trackListState("playlist:big").Visible()
+	if first < 0 || last < 0 || last-first > 40 {
+		t.Fatalf("visible rows = %d..%d, expected a small window", first, last)
+	}
+	if last >= len(tracks) {
+		t.Fatalf("visible last row = %d, want below %d", last, len(tracks))
+	}
+
+	a.trackListState("playlist:big").ScrollTo(400, ui.Start)
+	tt.Frame()
+	tt.Frame()
+	first, last = a.trackListState("playlist:big").Visible()
+	if first > 400 || last < 400 {
+		t.Fatalf("visible rows after scroll = %d..%d, want row 400", first, last)
+	}
+}
+
+func TestSongSearchUsesVirtualList(t *testing.T) {
+	a := newTestApp(t)
+	tracks := make([]ytmusic.Track, 300)
+	for i := range tracks {
+		tracks[i] = ytmusic.Track{ID: fmt.Sprintf("search-%d", i), Title: fmt.Sprintf("Result %d", i)}
+	}
+	r := route{page: pageSearch, query: "test", kind: ytmusic.SearchSongs}
+	a.route = r
+	a.searches[r] = &ytmusic.SearchResult{Tracks: tracks}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	first, last := a.trackListState(fmt.Sprintf("search:test:%d", ytmusic.SearchSongs)).Visible()
+	if first < 0 || last < 0 || last-first > 40 {
+		t.Fatalf("visible search rows = %d..%d, expected a small window", first, last)
+	}
+	if !tt.HasText("歌曲") {
+		t.Fatal("search list header was not rendered")
+	}
+}
+
+func TestArtistPageUsesVirtualList(t *testing.T) {
+	a := newTestApp(t)
+	tracks := make([]ytmusic.Track, 120)
+	for i := range tracks {
+		tracks[i] = ytmusic.Track{ID: fmt.Sprintf("artist-%d", i), Title: fmt.Sprintf("Track %d", i)}
+	}
+	a.artists["art-big"] = &ytmusic.Artist{ID: "art-big", Name: "Artist", TopTracks: tracks}
+	a.route = route{page: pageArtist, id: "art-big"}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	first, last := a.trackListState("artist:art-big").Visible()
+	if first < 0 || last < 0 || last-first > 40 {
+		t.Fatalf("visible artist rows = %d..%d, expected a small window", first, last)
 	}
 }
 

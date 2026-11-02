@@ -23,6 +23,10 @@ func (a *app) view(c *ui.Context) {
 	t := *c.Theme()
 	a.pal = paletteFor(&t)
 	p := a.pal
+	a.artPins = map[string]bool{}
+	if a.art != nil {
+		defer a.art.setPinned(a.artPins)
+	}
 
 	t.Accent = p.accent
 	t.AccentText = p.onAccent
@@ -54,6 +58,12 @@ func (a *app) view(c *ui.Context) {
 
 					// Page body scroll area
 					ui.Box(c).Grow(1).FillWidth().Children(func() {
+						if a.pageUsesTrackList() {
+							ui.Box(c).Grow(1).FillWidth().Padding(24, 32, playerHeight+24, 32).Children(func() {
+								a.content(c)
+							})
+							return
+						}
 						ui.Scroll(c).Vertical().Fill().TrackScroll(&a.contentScroll).Children(func() {
 							ui.Column(c).FillWidth().Padding(24, 32, playerHeight+24, 32).Children(func() {
 								a.content(c)
