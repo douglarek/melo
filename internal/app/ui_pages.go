@@ -255,7 +255,6 @@ func (a *app) viewLibrary(c *ui.Context) {
 	}
 
 	ui.Column(c).FillWidth().Gap(24).Children(func() {
-		a.libraryTabs(c)
 		a.libraryFilters(c)
 
 		if a.libraryLoading && len(a.libraryPlaylists) == 0 {
@@ -274,17 +273,6 @@ func (a *app) viewLibrary(c *ui.Context) {
 		default:
 			a.libraryEmpty(c, "暂无内容")
 		}
-	})
-}
-
-func (a *app) libraryTabs(c *ui.Context) {
-	p := a.pal
-	ui.Row(c).FillWidth().Height(42).BorderWidth(0, 0, 1, 0).BorderColor(p.hairline).Children(func() {
-		tab := ui.Column(c.Key("lib-tab-media")).Height(42).Padding(0, 0, 10, 0).BorderWidth(0, 0, 2, 0).BorderColor(p.text).Justify(ui.End)
-		tab.Children(func() {
-			ui.Text(c, "媒体库").FontSize(14).Bold().TextColor(p.text)
-		})
-		ui.Spacer(c)
 	})
 }
 
@@ -473,12 +461,12 @@ func (a *app) pageUsesTrackList() bool {
 	case pagePlaylist, pageAlbum, pageLiked, pageArtist:
 		return true
 	case pageSearch:
-		if a.route.kind != ytmusic.SearchSongs && a.route.kind != ytmusic.SearchVideos {
+		if a.route.kind != ytmusic.SearchSongs && a.route.kind != ytmusic.SearchVideos && a.route.kind != ytmusic.SearchPodcastEpisodes {
 			return false
 		}
 		res := a.searches[a.route]
 		return res != nil && len(res.Tracks) > 0 &&
-			len(res.Artists) == 0 && len(res.Albums) == 0 && len(res.Playlists) == 0
+			len(res.Artists) == 0 && len(res.Albums) == 0 && len(res.Playlists) == 0 && len(res.Podcasts) == 0
 	default:
 		return false
 	}

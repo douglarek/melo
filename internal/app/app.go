@@ -138,7 +138,7 @@ type app struct {
 	npVideoSeq        int
 	npVideo           *ui.VideoPlayer
 	npVideoTrack      string
-	lastAutoVideo     string
+	lastPlayedTrackID string
 	memoryTimer       *time.Timer
 	notifyTrackID     string
 	notifySeq         int
@@ -205,7 +205,7 @@ func Run() error {
 		a.pl.Changed = func() {
 			a.post(func() {
 				cur := a.pl.Current()
-				a.maybeAutoVideo(cur)
+				a.resetVideoForTrack(cur)
 				a.maybeNotifyTrack(cur)
 				a.syncNowPlayingLyrics()
 			})

@@ -16,6 +16,8 @@ const (
 	SearchAlbums
 	SearchArtists
 	SearchPlaylists
+	SearchPodcasts
+	SearchPodcastEpisodes
 )
 
 func (s SearchType) String() string {
@@ -30,6 +32,10 @@ func (s SearchType) String() string {
 		return "音乐人"
 	case SearchPlaylists:
 		return "歌单"
+	case SearchPodcasts:
+		return "播客"
+	case SearchPodcastEpisodes:
+		return "分集"
 	default:
 		return "全部"
 	}
@@ -48,6 +54,10 @@ func (s SearchType) Param() string {
 		return "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D"
 	case SearchPlaylists:
 		return "EgWKAQIoAWoKEAkQBRAKEAMQBA%3D%3D"
+	case SearchPodcasts:
+		return "EgWKAQJQAWoQEBAQAxAFEBEQCRAEEBUQCg%3D%3D"
+	case SearchPodcastEpisodes:
+		return "EgWKAQJIAWoQEBAQAxAFEBEQCRAEEBUQCg%3D%3D"
 	default:
 		return ""
 	}
@@ -212,6 +222,7 @@ type SearchResult struct {
 	Artists   []ArtistRef    `json:"artists"`
 	Albums    []AlbumItem    `json:"albums"`
 	Playlists []PlaylistItem `json:"playlists"`
+	Podcasts  []CardItem     `json:"podcasts,omitempty"`
 }
 
 // LyricLine represents a line of lyrics with optional timestamp.

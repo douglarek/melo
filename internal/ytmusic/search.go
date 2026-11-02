@@ -157,6 +157,31 @@ func parseCardShelf(card map[string]any, res *SearchResult) {
 			Artists:    []ArtistRef{{Name: subtitle}},
 			Video:      itemHasMusicVideo(card),
 		})
+		return
+	}
+
+	// Podcast shows and other browse results.
+	if len(titleRuns) > 0 {
+		run0, _ := titleRuns[0].(map[string]any)
+		nav, _ := run0["navigationEndpoint"].(map[string]any)
+		be, _ := nav["browseEndpoint"].(map[string]any)
+		browseID, _ := be["browseId"].(string)
+		pageType := ""
+		if supported, ok := be["browseEndpointContextSupportedConfigs"].(map[string]any); ok {
+			if musicConfig, ok := supported["browseEndpointContextMusicConfig"].(map[string]any); ok {
+				pageType, _ = musicConfig["pageType"].(string)
+			}
+		}
+		switch {
+		case strings.HasPrefix(browseID, "MPSPPL") || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
+			res.Podcasts = append(res.Podcasts, CardItem{ID: browseID, Title: title, Subtitle: subtitle, Thumbnail: thumbURL, Type: "podcast"})
+		case strings.HasPrefix(browseID, "UC") || pageType == "MUSIC_PAGE_TYPE_ARTIST":
+			res.Artists = append(res.Artists, ArtistRef{ID: browseID, Name: title, Thumbnail: thumbURL})
+		case strings.HasPrefix(browseID, "MPREb_") || pageType == "MUSIC_PAGE_TYPE_ALBUM":
+			res.Albums = append(res.Albums, AlbumItem{ID: browseID, Title: title, Artist: subtitle, Thumbnail: thumbURL})
+		case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL") || pageType == "MUSIC_PAGE_TYPE_PLAYLIST":
+			res.Playlists = append(res.Playlists, PlaylistItem{ID: browseID, Title: title, Author: subtitle, Thumbnail: thumbURL})
+		}
 	}
 }
 
@@ -261,6 +286,8 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 		res.Albums = append(res.Albums, AlbumItem{ID: browseID, Title: title, Artist: subtitle, Thumbnail: thumbURL})
 	case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL") || pageType == "MUSIC_PAGE_TYPE_PLAYLIST":
 		res.Playlists = append(res.Playlists, PlaylistItem{ID: browseID, Title: title, Author: subtitle, Thumbnail: thumbURL})
+	case strings.HasPrefix(browseID, "MPSPPL") || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
+		res.Podcasts = append(res.Podcasts, CardItem{ID: browseID, Title: title, Subtitle: subtitle, Thumbnail: thumbURL, Type: "podcast"})
 	case videoID != "":
 		res.Tracks = append(res.Tracks, Track{
 			ID:         videoID,

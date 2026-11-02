@@ -262,7 +262,7 @@ func (a *app) header(c *ui.Context) {
 		searchWrap := ui.Row(c.Key("search-bar")).Width(360).Height(36).Radius(18).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Gap(8)
 		searchWrap.Children(func() {
 			ui.Icon(c, iconSearch).Size(16, 16).TextColor(p.muted)
-			input := ui.TextInput(c, &a.searchQuery).Bind(&a.searchBox).Grow(1).Placeholder("搜索歌曲、专辑、音乐人").Background(ui.Transparent)
+			input := ui.TextInput(c, &a.searchQuery).Bind(&a.searchBox).Grow(1).Placeholder("搜索歌曲、专辑、音乐人、播客").Background(ui.Transparent)
 			input.BorderWidth(0).TextColor(p.text).FontSize(13)
 			if input.Submitted() {
 				a.search(a.searchQuery)

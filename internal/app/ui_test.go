@@ -1101,6 +1101,73 @@ func TestDoubleClickTopBarMaximize(t *testing.T) {
 	tt.Frame()
 }
 
+func TestSearchPodcastResults(t *testing.T) {
+	a := newTestApp(t)
+	r := route{page: pageSearch, query: "test", kind: ytmusic.SearchPodcasts}
+	a.route = r
+	a.searches[r] = &ytmusic.SearchResult{Podcasts: []ytmusic.CardItem{{
+		ID:        "MPSPPLtest",
+		Title:     "测试播客",
+		Subtitle:  "测试主播",
+		Type:      "podcast",
+		Thumbnail: "",
+	}}}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if !tt.HasText("播客") || !tt.HasText("测试播客") {
+		t.Fatal("podcast search results did not render")
+	}
+	if err := tt.Click("测试播客"); err != nil {
+		t.Fatalf("click podcast result: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pagePlaylist || a.route.id != "MPSPPLtest" {
+		t.Fatalf("podcast opened %+v", a.route)
+	}
+}
+
+func TestSearchPodcastEpisodesUseTrackList(t *testing.T) {
+	a := newTestApp(t)
+	r := route{page: pageSearch, query: "test", kind: ytmusic.SearchPodcastEpisodes}
+	a.route = r
+	a.searches[r] = &ytmusic.SearchResult{Tracks: []ytmusic.Track{{
+		ID: "episode1", Title: "测试分集", Video: true,
+	}}}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if !tt.HasText("分集") || !tt.HasText("测试分集") {
+		t.Fatal("podcast episode results did not render")
+	}
+}
+
+func TestVideoTrackDefaultsToAudio(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{
+		ID: "video1", Title: "测试视频歌曲", Video: true,
+	}}, 0)
+	a.nowPlayingOpen = true
+	a.npVideoMode = true
+	a.lastPlayedTrackID = "previous"
+	a.resetVideoForTrack(a.pl.Current())
+	if a.npVideoMode {
+		t.Fatal("video track should default to audio mode")
+	}
+	a.npVideoMode = true
+	a.resetVideoForTrack(a.pl.Current())
+	if !a.npVideoMode {
+		t.Fatal("switching video mode for the current track should be preserved")
+	}
+	a.npVideoMode = false
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if !tt.HasText("歌词") || !tt.HasText("视频") {
+		t.Fatal("now playing should show lyrics by default with a video switch")
+	}
+}
+
 func TestNowPlayingQueue(t *testing.T) {
 	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}

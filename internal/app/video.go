@@ -136,6 +136,19 @@ func (d *ffmpegVideoDecoder) Close() error {
 	return nil
 }
 
+func (a *app) resetVideoForTrack(cur *ytmusic.Track) {
+	id := ""
+	if cur != nil {
+		id = cur.ID
+	}
+	if id == a.lastPlayedTrackID {
+		return
+	}
+	a.lastPlayedTrackID = id
+	a.npVideoMode = false
+	a.closeVideo()
+}
+
 func (a *app) closeVideo() {
 	a.npVideoSeq++
 	a.npVideoStarting = false
@@ -146,24 +159,6 @@ func (a *app) closeVideo() {
 		// VideoPlayer.Close waits for its decoder; keep it off the UI thread.
 		go vp.Close()
 	}
-}
-
-func (a *app) maybeAutoVideo(cur *ytmusic.Track) {
-	if cur == nil || !cur.Video {
-		a.closeVideo()
-		a.npVideoMode = false
-		a.lastAutoVideo = ""
-		return
-	}
-	if cur.ID == a.lastAutoVideo {
-		return
-	}
-	if !a.pl.Playing() && !a.pl.PendingPlay() {
-		return
-	}
-	a.lastAutoVideo = cur.ID
-	a.nowPlayingOpen = true
-	a.npVideoMode = true
 }
 
 type primedVideoDecoder struct {

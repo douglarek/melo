@@ -10,7 +10,7 @@ import (
 
 func (a *app) searchFilters(c *ui.Context, r route) {
 	p := a.pal
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).FillWidth().Wrap().Gap(10).AlignItems(ui.Center).Children(func() {
 		categories := []struct {
 			label string
 			kind  ytmusic.SearchType
@@ -21,6 +21,8 @@ func (a *app) searchFilters(c *ui.Context, r route) {
 			{"专辑", ytmusic.SearchAlbums},
 			{"音乐人", ytmusic.SearchArtists},
 			{"歌单", ytmusic.SearchPlaylists},
+			{"播客", ytmusic.SearchPodcasts},
+			{"分集", ytmusic.SearchPodcastEpisodes},
 		}
 
 		for _, cat := range categories {
@@ -58,8 +60,11 @@ func (a *app) searchTrackList(c *ui.Context, r route, res *ytmusic.SearchResult)
 	ui.List(c, a.trackListState(key), count).Fill().Gap(2).Rows(func(row ui.ListRow) {
 		if row.Index == 0 {
 			title := "歌曲"
-			if r.kind == ytmusic.SearchVideos {
+			switch r.kind {
+			case ytmusic.SearchVideos:
 				title = "视频"
+			case ytmusic.SearchPodcastEpisodes:
+				title = "分集"
 			}
 			ui.Column(row.Context).FillWidth().Gap(20).Padding(0, 0, 12, 0).Children(func() {
 				a.searchFilters(row.Context, r)
@@ -95,7 +100,7 @@ func (a *app) viewSearch(c *ui.Context) {
 		}
 
 		// Empty check
-		hasResults := len(res.Tracks) > 0 || len(res.Artists) > 0 || len(res.Albums) > 0 || len(res.Playlists) > 0
+		hasResults := len(res.Tracks) > 0 || len(res.Artists) > 0 || len(res.Albums) > 0 || len(res.Playlists) > 0 || len(res.Podcasts) > 0
 		if !hasResults {
 			ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
 				ui.Text(c, "未找到相关结果").FontSize(16).Bold().TextColor(p.muted)
@@ -106,7 +111,11 @@ func (a *app) viewSearch(c *ui.Context) {
 
 		// Tracks
 		if len(res.Tracks) > 0 {
-			ui.Text(c, "歌曲").FontSize(18).Bold().TextColor(p.text)
+			title := "歌曲"
+			if r.kind == ytmusic.SearchPodcastEpisodes {
+				title = "分集"
+			}
+			ui.Text(c, title).FontSize(18).Bold().TextColor(p.text)
 			a.renderTrackTable(c, res.Tracks)
 		}
 
@@ -154,6 +163,11 @@ func (a *app) viewSearch(c *ui.Context) {
 				}
 			}
 			a.renderSection(c, searchKey+"-playlists", ytmusic.Section{Title: "歌单", Items: items})
+		}
+
+		// Podcast shows
+		if len(res.Podcasts) > 0 {
+			a.renderSection(c, searchKey+"-podcasts", ytmusic.Section{Title: "播客", Items: res.Podcasts})
 		}
 	})
 }
