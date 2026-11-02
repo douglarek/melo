@@ -241,6 +241,107 @@ func TestParseSectionsHandlesGridWithoutHeader(t *testing.T) {
 	}
 }
 
+func TestParseSectionsKeepsHeaderlessNavigationGrid(t *testing.T) {
+	root := map[string]any{
+		"contents": map[string]any{
+			"singleColumnBrowseResultsRenderer": map[string]any{
+				"tabs": []any{map[string]any{
+					"tabRenderer": map[string]any{
+						"content": map[string]any{
+							"sectionListRenderer": map[string]any{
+								"contents": []any{map[string]any{
+									"gridRenderer": map[string]any{
+										"items": []any{
+											map[string]any{"musicNavigationButtonRenderer": map[string]any{
+												"buttonText": map[string]any{"runs": []any{map[string]any{"text": "新发行"}}},
+												"clickCommand": map[string]any{"browseEndpoint": map[string]any{
+													"browseId": "FEmusic_new_releases",
+												}},
+												"iconStyle": map[string]any{"icon": map[string]any{
+													"iconType": "MUSIC_NEW_RELEASE",
+												}},
+											}},
+											map[string]any{"musicNavigationButtonRenderer": map[string]any{
+												"buttonText": map[string]any{"runs": []any{map[string]any{"text": "排行榜"}}},
+												"clickCommand": map[string]any{"browseEndpoint": map[string]any{
+													"browseId": "FEmusic_charts",
+												}},
+												"iconStyle": map[string]any{"icon": map[string]any{
+													"iconType": "TRENDING_UP",
+												}},
+											}},
+										},
+									},
+								}},
+							},
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	sections := parseSections(root)
+	if len(sections) != 1 {
+		t.Fatalf("sections = %d, want 1", len(sections))
+	}
+	sec := sections[0]
+	if sec.Layout != "shortcuts" || len(sec.Items) != 2 {
+		t.Fatalf("section = %+v", sec)
+	}
+	if sec.Items[0].Title != "新发行" || sec.Items[0].Type != "shortcut" || sec.Items[0].Icon != "MUSIC_NEW_RELEASE" || sec.Items[0].ID != "FEmusic_new_releases" {
+		t.Fatalf("first shortcut = %+v", sec.Items[0])
+	}
+	if sec.Items[1].Title != "排行榜" || sec.Items[1].Type != "shortcut" || sec.Items[1].Icon != "TRENDING_UP" || sec.Items[1].ID != "FEmusic_charts" {
+		t.Fatalf("second shortcut = %+v", sec.Items[1])
+	}
+}
+
+func TestParseSectionsMarksNavigationGridAsMoods(t *testing.T) {
+	root := map[string]any{
+		"contents": map[string]any{
+			"singleColumnBrowseResultsRenderer": map[string]any{
+				"tabs": []any{map[string]any{
+					"tabRenderer": map[string]any{
+						"content": map[string]any{
+							"sectionListRenderer": map[string]any{
+								"contents": []any{map[string]any{
+									"gridRenderer": map[string]any{
+										"header": map[string]any{"gridHeaderRenderer": map[string]any{
+											"title": map[string]any{"runs": []any{map[string]any{"text": "心情和场景"}}},
+										}},
+										"items": []any{
+											map[string]any{"musicNavigationButtonRenderer": map[string]any{
+												"buttonText": map[string]any{"runs": []any{map[string]any{"text": "悲伤"}}},
+												"clickCommand": map[string]any{"browseEndpoint": map[string]any{
+													"browseId": "FEmusic_moods_and_genres_category",
+													"params":   "sad-params",
+												}},
+											}},
+										},
+									},
+								}},
+							},
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	sections := parseSections(root)
+	if len(sections) != 1 {
+		t.Fatalf("sections = %d, want 1", len(sections))
+	}
+	sec := sections[0]
+	if sec.Title != "心情和场景" || sec.Layout != "moods" || len(sec.Items) != 1 {
+		t.Fatalf("section = %+v", sec)
+	}
+	if sec.Items[0].Title != "悲伤" || sec.Items[0].Params != "sad-params" {
+		t.Fatalf("item = %+v", sec.Items[0])
+	}
+}
+
 func TestContinuationItemsReadsAppendAction(t *testing.T) {
 	root := map[string]any{
 		"onResponseReceivedActions": []any{

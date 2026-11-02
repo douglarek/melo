@@ -29,13 +29,13 @@ func TestNavigation(t *testing.T) {
 		t.Fatalf("expected pageExplore, got %v", a.route.page)
 	}
 
-	// 2. Navigate to 排行榜 (Charts)
-	if err := tt.Click("排行榜"); err != nil {
-		t.Fatalf("click 排行榜 failed: %v", err)
+	// 2. Navigate to 媒体库 (Library)
+	if err := tt.Click("媒体库"); err != nil {
+		t.Fatalf("click 媒体库 failed: %v", err)
 	}
 	tt.Frame()
-	if a.route.page != pageCharts {
-		t.Fatalf("expected pageCharts, got %v", a.route.page)
+	if a.route.page != pageLibrary {
+		t.Fatalf("expected pageLibrary, got %v", a.route.page)
 	}
 
 	// 3. Navigate back to 首页 (Home)
@@ -45,6 +45,93 @@ func TestNavigation(t *testing.T) {
 	tt.Frame()
 	if a.route.page != pageHome {
 		t.Fatalf("expected pageHome, got %v", a.route.page)
+	}
+}
+
+func TestExploreShortcutOpensCharts(t *testing.T) {
+	a := newTestApp(t)
+	a.route = route{page: pageExplore}
+	a.exploreSections = []ytmusic.Section{{
+		Layout: "shortcuts",
+		Items: []ytmusic.CardItem{
+			{ID: "FEmusic_new_releases", Title: "新发行", Type: "mood", Icon: "MUSIC_NEW_RELEASE"},
+			{ID: "FEmusic_charts", Title: "排行榜", Type: "mood", Icon: "TRENDING_UP"},
+		},
+	}}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if !tt.HasText("新发行") || !tt.HasText("排行榜") {
+		t.Fatal("shortcut cards did not render")
+	}
+	if err := tt.Click("排行榜"); err != nil {
+		t.Fatalf("click 排行榜 shortcut: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageCharts {
+		t.Fatalf("shortcut opened %+v, want pageCharts", a.route)
+	}
+}
+
+func TestLibraryPageRendersPlaylists(t *testing.T) {
+	a := newTestApp(t)
+	a.route = route{page: pageLibrary}
+	a.libraryPlaylists = []ytmusic.PlaylistItem{{
+		ID:         "pl1",
+		Title:      "华语流行精选",
+		Author:     "leo",
+		TrackCount: "3 首歌曲",
+	}}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	for _, text := range []string{"媒体库", "播放列表", "赞过的音乐", "华语流行精选", "近期活动"} {
+		if !tt.HasText(text) {
+			t.Fatalf("library page missing %q", text)
+		}
+	}
+	for _, text := range []string{"下载内容", "上传的内容"} {
+		if tt.HasText(text) {
+			t.Fatalf("library page still shows removed tab %q", text)
+		}
+	}
+
+	if err := tt.Click("歌曲"); err != nil {
+		t.Fatalf("click 歌曲 filter: %v", err)
+	}
+	tt.Frame()
+	if a.libraryFilter != "songs" || !tt.HasText("暂无歌曲") {
+		t.Fatalf("songs filter = %q, page = %v", a.libraryFilter, tt.HasText("暂无歌曲"))
+	}
+}
+
+func TestCategoryMoodButtonsOpenSubcategory(t *testing.T) {
+	a := newTestApp(t)
+	const rootID = "FEmusic_moods_and_genres"
+	a.route = route{page: pageCategory, id: rootID}
+	a.categories[categoryKey(rootID, "")] = &ytmusic.Category{
+		ID:    rootID,
+		Title: "心情与流派",
+		Sections: []ytmusic.Section{{
+			Title:  "心情和场景",
+			Layout: "moods",
+			Items: []ytmusic.CardItem{{
+				ID:     "FEmusic_moods_and_genres_category",
+				Title:  "悲伤",
+				Type:   "mood",
+				Params: "sad-params",
+			}},
+		}},
+	}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("悲伤"); err != nil {
+		t.Fatalf("click 悲伤: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageCategory || a.route.params != "sad-params" {
+		t.Fatalf("route = %+v, want sad category", a.route)
 	}
 }
 

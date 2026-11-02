@@ -116,9 +116,10 @@ type CardItem struct {
 	Title     string `json:"title"`
 	Subtitle  string `json:"subtitle"`
 	Thumbnail string `json:"thumbnail"`
-	Type      string `json:"type"` // "track", "album", "playlist", "artist", "mood"
+	Type      string `json:"type"` // "track", "album", "playlist", "artist", "mood", "shortcut"
 	Params    string `json:"params,omitempty"`
 	Color     uint32 `json:"color,omitempty"`
+	Icon      string `json:"icon,omitempty"`
 	Track     *Track `json:"track,omitempty"`
 }
 
@@ -126,7 +127,7 @@ type CardItem struct {
 type Section struct {
 	Title  string     `json:"title"`
 	Items  []CardItem `json:"items"`
-	Layout string     `json:"layout,omitempty"` // "moods" for the moods and genres grid
+	Layout string     `json:"layout,omitempty"` // "moods" or "shortcuts" for Explore grids
 }
 
 // Category is a mood or genre page with its sections.

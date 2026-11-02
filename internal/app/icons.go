@@ -27,6 +27,11 @@ var (
 	iconSearch    = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`)
 	iconHome      = strokeIcon(`<path d="M12 3 4 9v11a1 1 0 0 0 1 1h4v-6h6v6h4a1 1 0 0 0 1-1V9z"/>`)
 	iconExplore   = strokeIcon(`<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>`)
+	iconLibrary   = strokeIcon(`<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>`)
+	iconNew       = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 8v8"/><path d="M8 12h8"/>`)
+	iconTrending  = strokeIcon(`<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>`)
+	iconSmile     = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>`)
+	iconPodcast   = strokeIcon(`<circle cx="12" cy="10" r="2.5"/><path d="M7.5 14.5a6 6 0 0 1 9 0"/><path d="M5 17.5a9 9 0 0 1 14 0"/>`)
 	iconCharts    = strokeIcon(`<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>`)
 	iconQueue     = strokeIcon(`<path d="M16 5H3"/><path d="M11 12H3"/><path d="M11 19H3"/><path d="M21 16V5"/><circle cx="18" cy="16" r="3"/>`)
 	iconLyrics    = strokeIcon(`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/>`)
@@ -44,3 +49,18 @@ var (
 	iconExternal  = strokeIcon(`<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>`)
 	iconCopy      = strokeIcon(`<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
 )
+
+func shortcutIcon(kind string) *ui.SVG {
+	switch kind {
+	case "MUSIC_NEW_RELEASE":
+		return iconNew
+	case "TRENDING_UP":
+		return iconTrending
+	case "STICKER_EMOTICON":
+		return iconSmile
+	case "BROADCAST":
+		return iconPodcast
+	default:
+		return iconExplore
+	}
+}

@@ -162,26 +162,32 @@ func (a *app) renderSection(c *ui.Context, key string, sec ytmusic.Section) {
 			a.renderMoodSection(c, key, sec)
 			return
 		}
+		if sec.Layout == "shortcuts" {
+			a.renderShortcuts(c, key, sec)
+			return
+		}
 
 		state := a.sectionScroll(key)
 		step := float32(6 * (150 + 16))
 		prevOn := state.X > 0.5
 		nextOn := state.X < state.MaxX-0.5 || (state.MaxX == 0 && len(sec.Items) > 5)
-		a.sectionHeader(c, key, sec.Title, prevOn, nextOn,
-			func() {
-				state.ScrollTo(max(0, state.X-step), 0, ui.Smooth)
-			},
-			func() {
-				target := state.X + step
-				if state.MaxX > 0 && target > state.MaxX {
-					target = state.MaxX
-				}
-				state.ScrollTo(target, 0, ui.Smooth)
-			},
-			func() {
-				a.openMore(key, sec)
-			},
-		)
+		if sec.Title != "" {
+			a.sectionHeader(c, key, sec.Title, prevOn, nextOn,
+				func() {
+					state.ScrollTo(max(0, state.X-step), 0, ui.Smooth)
+				},
+				func() {
+					target := state.X + step
+					if state.MaxX > 0 && target > state.MaxX {
+						target = state.MaxX
+					}
+					state.ScrollTo(target, 0, ui.Smooth)
+				},
+				func() {
+					a.openMore(key, sec)
+				},
+			)
+		}
 
 		items := sec.Items
 		if len(items) > 40 {
@@ -194,6 +200,171 @@ func (a *app) renderSection(c *ui.Context, key string, sec ytmusic.Section) {
 				}
 			})
 		})
+	})
+}
+
+func (a *app) renderShortcuts(c *ui.Context, key string, sec ytmusic.Section) {
+	p := a.pal
+	ui.Row(c).FillWidth().Gap(16).Children(func() {
+		for i, item := range sec.Items {
+			item := item
+			card := ui.Column(c.Key(fmt.Sprintf("%s-%d", key, i))).Grow(1).Basis(0).Height(96).Radius(10).Padding(16).Background(p.card).AlignItems(ui.Start).Justify(ui.SpaceBetween).Cursor(ui.CursorPointer)
+			if card.Hovered() {
+				card.Background(p.hover)
+			}
+			if card.Clicked() {
+				a.openShortcut(item)
+			}
+			card.Children(func() {
+				ui.Icon(c, shortcutIcon(item.Icon)).Size(20, 20).TextColor(p.text)
+				ui.Text(c, item.Title).FontSize(15).Bold().TextColor(p.text).SingleLine()
+			})
+		}
+	})
+}
+
+func (a *app) openShortcut(item ytmusic.CardItem) {
+	if item.ID == "" {
+		return
+	}
+	if item.ID == "FEmusic_charts" {
+		a.open(route{page: pageCharts})
+		return
+	}
+	a.open(route{page: pageCategory, id: item.ID, params: item.Params})
+}
+
+func (a *app) viewLibrary(c *ui.Context) {
+	p := a.pal
+	if a.libraryFilter == "" {
+		a.libraryFilter = "playlists"
+	}
+
+	ui.Column(c).FillWidth().Gap(24).Children(func() {
+		a.libraryTabs(c)
+		a.libraryFilters(c)
+
+		if a.libraryLoading && len(a.libraryPlaylists) == 0 {
+			ui.Column(c).FillWidth().Height(220).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
+				ui.Spinner(c)
+				ui.Text(c, "正在同步媒体库...").FontSize(13).TextColor(p.muted)
+			})
+			return
+		}
+
+		switch a.libraryFilter {
+		case "songs":
+			a.librarySongs(c)
+		case "playlists":
+			a.libraryPlaylistGrid(c)
+		default:
+			a.libraryEmpty(c, "暂无内容")
+		}
+	})
+}
+
+func (a *app) libraryTabs(c *ui.Context) {
+	p := a.pal
+	ui.Row(c).FillWidth().Height(42).BorderWidth(0, 0, 1, 0).BorderColor(p.hairline).Children(func() {
+		tab := ui.Column(c.Key("lib-tab-media")).Height(42).Padding(0, 0, 10, 0).BorderWidth(0, 0, 2, 0).BorderColor(p.text).Justify(ui.End)
+		tab.Children(func() {
+			ui.Text(c, "媒体库").FontSize(14).Bold().TextColor(p.text)
+		})
+		ui.Spacer(c)
+	})
+}
+
+func (a *app) libraryFilters(c *ui.Context) {
+	p := a.pal
+	filters := []struct {
+		key   string
+		label string
+	}{
+		{"playlists", "播放列表"},
+		{"songs", "歌曲"},
+		{"albums", "专辑"},
+		{"artists", "音乐人"},
+		{"profile", "个人资料"},
+		{"podcasts", "播客"},
+	}
+
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
+		for _, f := range filters {
+			active := a.libraryFilter == f.key
+			bg, col := p.card, p.text
+			if active {
+				bg, col = p.text, p.sidebar
+			}
+			pill := ui.Row(c.Key("lib-filter-"+f.key)).Height(30).Radius(15).Background(bg).Padding(0, 14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+			if pill.Clicked() {
+				a.libraryFilter = f.key
+				c.Invalidate()
+			}
+			pill.Children(func() {
+				ui.Text(c, f.label).FontSize(12.5).TextColor(col)
+			})
+		}
+		ui.Spacer(c)
+		sort := ui.Row(c.Key("lib-sort")).Height(30).Radius(15).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
+		sort.Children(func() {
+			ui.Text(c, "近期活动").FontSize(12.5).TextColor(p.text)
+			ui.Icon(c, iconChevron).Size(12, 12).TextColor(p.muted)
+		})
+	})
+}
+
+func (a *app) libraryPlaylistGrid(c *ui.Context) {
+	items := make([]ytmusic.CardItem, 0, len(a.libraryPlaylists)+1)
+	items = append(items, ytmusic.CardItem{
+		ID:       "LM",
+		Title:    "赞过的音乐",
+		Subtitle: "自动播放列表",
+		Type:     "playlist",
+	})
+	for _, pl := range a.libraryPlaylists {
+		subtitle := "播放列表"
+		if pl.Author != "" {
+			subtitle += " • " + pl.Author
+		}
+		if pl.TrackCount != "" {
+			subtitle += " • " + pl.TrackCount
+		}
+		items = append(items, ytmusic.CardItem{
+			ID:        pl.ID,
+			Title:     pl.Title,
+			Subtitle:  subtitle,
+			Thumbnail: pl.Thumbnail,
+			Type:      "playlist",
+		})
+	}
+
+	ui.Row(c).FillWidth().Wrap().Gap(24).AlignItems(ui.Start).Children(func() {
+		for i, item := range items {
+			a.renderCard(c.Key(fmt.Sprintf("lib-card-%d", i)), item)
+		}
+	})
+}
+
+func (a *app) librarySongs(c *ui.Context) {
+	tracks := a.likedTracks()
+	if len(tracks) == 0 {
+		a.libraryEmpty(c, "暂无歌曲")
+		return
+	}
+
+	cur := a.pl.Current()
+	ui.Column(c).FillWidth().Gap(2).Children(func() {
+		for i := range tracks {
+			a.renderTrackRow(c.Key(fmt.Sprintf("lib-track-%d", i)), tracks, i, cur)
+		}
+	})
+}
+
+func (a *app) libraryEmpty(c *ui.Context, text string) {
+	p := a.pal
+	ui.Column(c).FillWidth().Height(220).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
+		ui.Icon(c, iconLibrary).Size(30, 30).TextColor(p.faint)
+		ui.Text(c, text).FontSize(13).TextColor(p.muted)
 	})
 }
 
@@ -427,7 +598,18 @@ func (a *app) renderCard(c *ui.Context, item ytmusic.CardItem) {
 
 	card.Children(func() {
 		// Cover image
-		a.coverImage(c, item.Thumbnail, 150, 8)
+		if isLikedPlaylistID(item.ID) {
+			liked := ui.Box(c).Size(150, 150).Radius(8).LinearGradient(ui.LinearGradient{
+				From:  ui.RGB(236, 64, 122),
+				To:    ui.RGB(156, 39, 176),
+				Angle: 135,
+			}).AlignItems(ui.Center).Justify(ui.Center)
+			liked.Children(func() {
+				ui.Icon(c, iconHeartFill).Size(48, 48).TextColor(ui.RGBA(1, 1, 1, 0.92))
+			})
+		} else {
+			a.coverImage(c, item.Thumbnail, 150, 8)
+		}
 
 		// Titles
 		ui.Text(c, item.Title).FontSize(13).Bold().TextColor(p.text).MaxLines(2).Tooltip(item.Title)

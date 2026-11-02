@@ -20,6 +20,7 @@ type pageKind int
 const (
 	pageHome pageKind = iota
 	pageExplore
+	pageLibrary
 	pageCharts
 	pagePlaylist
 	pageAlbum
@@ -106,6 +107,7 @@ type app struct {
 
 	libraryPlaylists []ytmusic.PlaylistItem
 	libraryLoading   bool
+	libraryFilter    string
 
 	// Search UI
 	searchBox       ui.Handle

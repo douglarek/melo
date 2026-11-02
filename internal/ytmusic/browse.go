@@ -200,9 +200,18 @@ func parseSections(root map[string]any) []Section {
 				}
 				title := RunsToString(header["title"])
 				gridItems, _ := grid["items"].([]any)
+				layout := ""
+				if isNavigationButtonGrid(gridItems) {
+					layout = "moods"
+					// Explore starts with a headerless grid of shortcut buttons
+					// (新发行/排行榜/心情与流派/播客).
+					if title == "" {
+						layout = "shortcuts"
+					}
+				}
 				items := parseCarouselContents(gridItems)
 				if len(items) > 0 {
-					sections = append(sections, Section{Title: title, Items: items})
+					sections = append(sections, Section{Title: title, Items: items, Layout: layout})
 				}
 				continue
 			}
@@ -224,7 +233,7 @@ func parseSections(root map[string]any) []Section {
 		items := parseCarouselContents(cList)
 		if len(items) > 0 {
 			layout := ""
-			if items[0].Type == "mood" {
+			if isNavigationButtonGrid(cList) {
 				layout = "moods"
 			}
 			sections = append(sections, Section{
@@ -236,6 +245,21 @@ func parseSections(root map[string]any) []Section {
 	}
 
 	return sections
+}
+
+// isNavigationButtonGrid reports whether every item is a navigation button,
+// the shape Explore uses for its headerless shortcut grid.
+func isNavigationButtonGrid(rawItems []any) bool {
+	if len(rawItems) == 0 {
+		return false
+	}
+	for _, raw := range rawItems {
+		item, _ := raw.(map[string]any)
+		if _, ok := item["musicNavigationButtonRenderer"]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func parseCarouselContents(rawItems []any) []CardItem {
@@ -279,12 +303,24 @@ func parseNavigationButton(n map[string]any) CardItem {
 		}
 	}
 
+	var icon string
+	if style, ok := n["iconStyle"].(map[string]any); ok {
+		if kind, ok := style["icon"].(map[string]any); ok {
+			icon, _ = kind["iconType"].(string)
+		}
+	}
+	itemType := "mood"
+	if icon != "" {
+		itemType = "shortcut"
+	}
+
 	return CardItem{
 		ID:     id,
 		Title:  title,
-		Type:   "mood",
+		Type:   itemType,
 		Params: params,
 		Color:  color,
+		Icon:   icon,
 	}
 }
 

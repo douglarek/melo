@@ -135,7 +135,7 @@ func (a *app) sidebar(c *ui.Context) {
 
 			navItem("首页", iconHome, pageHome)
 			navItem("探索", iconExplore, pageExplore)
-			navItem("排行榜", iconCharts, pageCharts)
+			navItem("媒体库", iconLibrary, pageLibrary)
 
 			// Library section
 			ui.Box(c).Height(14)
@@ -279,6 +279,8 @@ func (a *app) content(c *ui.Context) {
 		a.viewHome(c)
 	case pageExplore:
 		a.viewExplore(c)
+	case pageLibrary:
+		a.viewLibrary(c)
 	case pageCharts:
 		a.viewCharts(c)
 	case pageSearch:
