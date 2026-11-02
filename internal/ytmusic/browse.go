@@ -1035,7 +1035,10 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 		ID: artistID,
 	}
 
-	header, _ := root["header"].(map[string]any)["musicImmersiveHeaderRenderer"].(map[string]any)
+	var header map[string]any
+	if rootHeader, ok := root["header"].(map[string]any); ok {
+		header, _ = rootHeader["musicImmersiveHeaderRenderer"].(map[string]any)
+	}
 	if header != nil {
 		art.Name = RunsToString(header["title"])
 		art.Description = RunsToString(header["description"])
@@ -1048,9 +1051,14 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 		art.Thumbnail = BestThumbnail(thumbs)
 	}
 
-	contents, _ := root["contents"].(map[string]any)["singleColumnBrowseResultsRenderer"].(map[string]any)["tabs"].([]any)
+	var contents []any
+	if rootContents, ok := root["contents"].(map[string]any); ok {
+		if sc, ok := rootContents["singleColumnBrowseResultsRenderer"].(map[string]any); ok {
+			contents, _ = sc["tabs"].([]any)
+		}
+	}
 	if len(contents) > 0 {
-		sections, _ := contents[0].(map[string]any)["tabRenderer"].(map[string]any)["content"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
+		sections := tabSections(contents[0])
 		for _, s := range sections {
 			sm, ok := s.(map[string]any)
 			if !ok {
@@ -1058,11 +1066,12 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 			}
 			// MusicShelfRenderer (Songs)
 			if shelf, ok := sm["musicShelfRenderer"].(map[string]any); ok {
-				title := RunsToString(shelf["title"].(map[string]any)["runs"])
+				title := RunsToString(shelf["title"])
 				if strings.Contains(title, "歌曲") || strings.Contains(title, "Songs") || strings.Contains(title, "Top") {
 					items, _ := shelf["contents"].([]any)
 					for _, item := range items {
-						r, _ := item.(map[string]any)["musicResponsiveListItemRenderer"].(map[string]any)
+						im, _ := item.(map[string]any)
+						r, _ := im["musicResponsiveListItemRenderer"].(map[string]any)
 						if r != nil {
 							track := parseTrackFromListItem(r)
 							if track.ID != "" {
@@ -1074,11 +1083,15 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 			}
 			// MusicCarouselShelfRenderer (Albums, Singles)
 			if car, ok := sm["musicCarouselShelfRenderer"].(map[string]any); ok {
-				header, _ := car["header"].(map[string]any)["musicCarouselShelfBasicHeaderRenderer"].(map[string]any)
-				title := RunsToString(header["title"].(map[string]any)["runs"])
+				var carHeader map[string]any
+				if h, ok := car["header"].(map[string]any); ok {
+					carHeader, _ = h["musicCarouselShelfBasicHeaderRenderer"].(map[string]any)
+				}
+				title := RunsToString(carHeader["title"])
 				items, _ := car["contents"].([]any)
 				for _, item := range items {
-					twoRow, _ := item.(map[string]any)["musicTwoRowItemRenderer"].(map[string]any)
+					im, _ := item.(map[string]any)
+					twoRow, _ := im["musicTwoRowItemRenderer"].(map[string]any)
 					if twoRow == nil {
 						continue
 					}
@@ -1112,6 +1125,16 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 	}
 
 	return art, nil
+}
+
+// tabSections extracts the section list from a tab renderer.
+func tabSections(raw any) []any {
+	tab, _ := raw.(map[string]any)
+	tr, _ := tab["tabRenderer"].(map[string]any)
+	content, _ := tr["content"].(map[string]any)
+	sl, _ := content["sectionListRenderer"].(map[string]any)
+	sections, _ := sl["contents"].([]any)
+	return sections
 }
 
 func findShelfContents(sections []any) ([]any, string) {
