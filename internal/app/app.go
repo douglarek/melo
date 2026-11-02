@@ -675,15 +675,6 @@ func (a *app) likedTracks() []ytmusic.Track {
 }
 
 func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
-	if a.pageUsesTrackList() {
-		state := a.currentTrackListState()
-		if state == nil || !state.AtEnd() {
-			return
-		}
-	} else if a.contentScroll.MaxY <= 0 || a.contentScroll.Y < a.contentScroll.MaxY-300 {
-		return
-	}
-
 	key := a.route.id
 	switch a.route.page {
 	case pagePlaylist:
@@ -700,6 +691,28 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 	if pl == nil || pl.Continuation == "" || a.loadingMore[key] {
 		return
 	}
+	loaded := len(pl.Tracks)
+	if key == "LM" {
+		loaded = len(a.liked)
+	}
+	if pl.TrackCount > 0 && loaded >= pl.TrackCount {
+		pl.Continuation = ""
+		return
+	}
+
+	if a.pageUsesTrackList() {
+		state := a.currentTrackListState()
+		if state == nil {
+			return
+		}
+		_, last := state.Visible()
+		if last < 0 || last < loaded-2 {
+			return
+		}
+	} else if a.contentScroll.MaxY <= 0 || a.contentScroll.Y < a.contentScroll.MaxY-300 {
+		return
+	}
+
 	token := pl.Continuation
 	a.loadingMore[key] = true
 	c.Invalidate()
@@ -711,15 +724,30 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 			if err != nil {
 				return
 			}
+			added := 0
 			if p := a.playlists[key]; p != nil {
+				before := len(p.Tracks)
 				p.Tracks = appendUniqueTracks(p.Tracks, tracks)
+				added = len(p.Tracks) - before
 				p.Continuation = next
 				if p.TrackCount < len(p.Tracks) {
 					p.TrackCount = len(p.Tracks)
 				}
+				if added == 0 {
+					p.Continuation = ""
+				}
 			}
 			if key == "LM" {
+				before := len(a.liked)
 				a.liked = appendUniqueTracks(a.liked, tracks)
+				if len(a.liked) > before {
+					added++
+				}
+			}
+			if added == 0 {
+				if p := a.playlists[key]; p != nil {
+					p.Continuation = ""
+				}
 			}
 		})
 	}()

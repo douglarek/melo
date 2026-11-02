@@ -459,7 +459,7 @@ func (a *app) viewPlaylist(c *ui.Context) {
 func (a *app) playlistTrackList(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
 	key := playlistKey(pl.ID)
 	count := 1 + len(tracks)
-	if pl.Continuation != "" {
+	if a.loadingMore[key] {
 		count++
 	}
 	cur := a.pl.Current()
@@ -700,7 +700,7 @@ func (a *app) viewLiked(c *ui.Context) {
 	}
 
 	count := 1 + len(tracks)
-	if likedPlaylist != nil && likedPlaylist.Continuation != "" {
+	if a.loadingMore["LM"] {
 		count++
 	}
 	cur := a.pl.Current()

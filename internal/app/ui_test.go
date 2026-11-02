@@ -368,6 +368,7 @@ func TestMoodSectionArrowsPage(t *testing.T) {
 func TestPlaylistShowsLoadMoreFooter(t *testing.T) {
 	a := newTestApp(t)
 	a.playlists["pl1"].Continuation = "next-page"
+	a.playlists["pl1"].TrackCount = 4
 	a.loadingMore["pl1"] = true
 	a.route = route{page: pagePlaylist, id: "pl1"}
 
@@ -378,6 +379,59 @@ func TestPlaylistShowsLoadMoreFooter(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("正在加载更多...") {
 		t.Fatal("playlist did not show the load-more footer")
+	}
+}
+
+func TestPlaylistHidesFooterWhenComplete(t *testing.T) {
+	a := newTestApp(t)
+	a.playlists["pl1"].Continuation = "stale-token"
+	a.playlists["pl1"].TrackCount = 3
+	a.route = route{page: pagePlaylist, id: "pl1"}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if tt.HasText("继续向下滚动加载更多") || tt.HasText("正在加载更多...") {
+		t.Fatal("complete playlist still shows a load-more footer")
+	}
+}
+
+func TestPlaylistHidesFooterWhenTrackCountUnknown(t *testing.T) {
+	a := newTestApp(t)
+	tracks := make([]ytmusic.Track, 120)
+	for i := range tracks {
+		tracks[i] = ytmusic.Track{ID: fmt.Sprintf("track-%d", i), Title: fmt.Sprintf("Song %d", i)}
+	}
+	a.playlists["pl1"].Tracks = tracks
+	a.playlists["pl1"].TrackCount = 0
+	a.playlists["pl1"].Continuation = "stale-token"
+	a.route = route{page: pagePlaylist, id: "pl1"}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if tt.HasText("继续向下滚动加载更多") || tt.HasText("正在加载更多...") {
+		t.Fatal("playlist shows a footer while not loading")
+	}
+}
+
+func TestLikedHidesFooterWhenComplete(t *testing.T) {
+	a := newTestApp(t)
+	a.liked = []ytmusic.Track{
+		{ID: "liked-1", Title: "One"},
+		{ID: "liked-2", Title: "Two"},
+	}
+	a.playlists["LM"] = &ytmusic.Playlist{
+		ID:           "LM",
+		Title:        "我喜欢的音乐",
+		Tracks:       a.liked,
+		TrackCount:   len(a.liked),
+		Continuation: "stale-token",
+	}
+	a.route = route{page: pageLiked}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if tt.HasText("继续向下滚动加载更多") || tt.HasText("正在加载更多...") {
+		t.Fatal("complete liked playlist still shows a load-more footer")
 	}
 }
 
