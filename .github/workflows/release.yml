@@ -1,0 +1,176 @@
+name: Release latest
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: latest-release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute version
+        id: version
+        run: |
+          base=$(python3 -c 'import json; print(json.load(open("mygo.json"))["version"])')
+          base=$(printf '%s' "$base" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          ts=$(git show -s --format=%cd --date=format:%Y%m%d%H%M%S HEAD)
+          sha=$(git rev-parse --short=7 HEAD)
+          echo "version=${base}.${ts}git.${sha}" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: Build macOS DMG
+    needs: prepare
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set build version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = "mygo.json"
+          with open(path) as f:
+              cfg = json.load(f)
+          cfg["version"] = os.environ["VERSION"]
+          with open(path, "w") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          PY
+          grep '"version"' mygo.json
+
+      - name: Build universal DMG
+        run: go tool mygo build -platform darwin/universal -skip-notarize
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: build/darwin-universal/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Build Linux packages
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set build version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = "mygo.json"
+          with open(path) as f:
+              cfg = json.load(f)
+          cfg["version"] = os.environ["VERSION"]
+          with open(path, "w") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          PY
+          grep '"version"' mygo.json
+
+      - name: Build amd64 and arm64 packages
+        run: |
+          go tool mygo build -platform linux/amd64
+          go tool mygo build -platform linux/arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            build/linux-amd64/*.tar.gz
+            build/linux-amd64/*.deb
+            build/linux-arm64/*.tar.gz
+            build/linux-arm64/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish latest release
+    needs: [prepare, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check packages
+        run: |
+          count=$(find dist -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' \) | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo "no release packages were downloaded" >&2
+            exit 1
+          fi
+          find dist -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' \) -print
+
+      - name: Move latest tag
+        run: |
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin refs/tags/latest
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          {
+            echo "Rolling build ${VERSION} from ${GITHUB_SHA}."
+            echo
+            echo "- macOS: universal DMG (ad-hoc signed, not notarized; right-click > Open if Gatekeeper blocks)"
+            echo "- Linux: amd64 and arm64 tar.gz and .deb"
+            echo "- ffmpeg is optional; HE-AAC playback and music videos need it"
+            echo
+            echo "Source: https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          } > /tmp/release-notes.md
+
+          if gh release view latest >/dev/null 2>&1; then
+            gh release view latest --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+              [ -n "$asset" ] && gh release delete-asset latest "$asset" --yes
+            done
+            gh release edit latest --title "Latest" --latest --notes-file /tmp/release-notes.md
+          else
+            gh release create latest --title "Latest" --latest --verify-tag --notes-file /tmp/release-notes.md
+          fi
+
+          find dist -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' \) -print0 \
+            | xargs -0 -r gh release upload latest --clobber
+
+          gh release view latest --json assets --jq '.assets[].name'
