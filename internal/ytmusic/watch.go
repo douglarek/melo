@@ -2,6 +2,7 @@ package ytmusic
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -212,6 +214,104 @@ func (c *Client) GetLyrics(ctx context.Context, lyricsBrowseID string, durationM
 	return parseLRC(fullText, dur)
 }
 
+// GetTimedLyrics retrieves timed lyrics through the Android Music client.
+func (c *Client) GetTimedLyrics(ctx context.Context, browseID string) (*Lyrics, error) {
+	if browseID == "" {
+		return nil, errors.New("no lyrics available")
+	}
+
+	data, err := c.postWithClient(ctx, "browse", map[string]any{
+		"browseId": browseID,
+	}, nil, map[string]any{
+		"clientName":        androidMusicClientName,
+		"clientVersion":     androidMusicClientVersion,
+		"androidSdkVersion": 30,
+		"osName":            "Android",
+		"osVersion":         "11",
+	}, androidMusicUserAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+	return parseTimedLyrics(root)
+}
+
+func parseTimedLyrics(root map[string]any) (*Lyrics, error) {
+	raw := findTimedLyricsData(root)
+	if len(raw) == 0 {
+		return nil, errors.New("timed lyrics not found")
+	}
+
+	lines := make([]LyricLine, 0, len(raw))
+	for _, item := range raw {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		text, _ := entry["lyricLine"].(string)
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		cue, _ := entry["cueRange"].(map[string]any)
+		lines = append(lines, LyricLine{
+			TimeMs: lyricTimeMilliseconds(cue["startTimeMilliseconds"]),
+			Text:   text,
+		})
+	}
+	if len(lines) == 0 {
+		return nil, errors.New("timed lyrics not found")
+	}
+
+	slices.SortStableFunc(lines, func(a, b LyricLine) int {
+		return cmp.Compare(a.TimeMs, b.TimeMs)
+	})
+	return &Lyrics{Lines: lines, Synced: true}, nil
+}
+
+func findTimedLyricsData(value any) []any {
+	switch node := value.(type) {
+	case map[string]any:
+		if raw, ok := node["timedLyricsData"].([]any); ok {
+			return raw
+		}
+		for _, child := range node {
+			if raw := findTimedLyricsData(child); raw != nil {
+				return raw
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if raw := findTimedLyricsData(child); raw != nil {
+				return raw
+			}
+		}
+	}
+	return nil
+}
+
+func lyricTimeMilliseconds(value any) int64 {
+	switch v := value.(type) {
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil {
+			return n
+		}
+		f, _ := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return int64(f)
+	case float64:
+		return int64(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	}
+	return 0
+}
+
 var cleanTitleReg = regexp.MustCompile(`(?i)\s*[\(\[](official|video|audio|mv|hd|hq|live|remastered)[^\)\]]*[\)\]]`)
 
 func cleanTrackTitle(title string) string {
@@ -273,7 +373,7 @@ func FetchLrcLibLyrics(ctx context.Context, title, artist string, durationSec in
 	return parseLRC(raw, int64(durationSec)*1000)
 }
 
-func parseLRC(raw string, durationMs int64) (*Lyrics, error) {
+func parseLRC(raw string, _ int64) (*Lyrics, error) {
 	lyrics := &Lyrics{Synced: false}
 	lines := strings.Split(raw, "\n")
 	hasLRC := false
@@ -283,22 +383,28 @@ func parseLRC(raw string, durationMs int64) (*Lyrics, error) {
 		if trimmed == "" {
 			continue
 		}
-		m := lrcTimestampReg.FindStringSubmatch(trimmed)
-		if len(m) > 0 {
+		matches := lrcTimestampReg.FindAllStringSubmatch(trimmed, -1)
+		if len(matches) > 0 {
 			hasLRC = true
 			lyrics.Synced = true
-			min, _ := strconv.ParseInt(m[1], 10, 64)
-			sec, _ := strconv.ParseInt(m[2], 10, 64)
-			var ms int64
-			if len(m) > 3 && m[3] != "" {
-				ms, _ = strconv.ParseInt(m[3], 10, 64)
-				if len(m[3]) == 2 {
-					ms *= 10
-				}
-			}
-			tMs := (min*60+sec)*1000 + ms
 			cleanLine := strings.TrimSpace(lrcTimestampReg.ReplaceAllString(trimmed, ""))
-			if cleanLine != "" {
+			if cleanLine == "" {
+				continue
+			}
+			for _, m := range matches {
+				min, _ := strconv.ParseInt(m[1], 10, 64)
+				sec, _ := strconv.ParseInt(m[2], 10, 64)
+				var ms int64
+				if len(m) > 3 && m[3] != "" {
+					ms, _ = strconv.ParseInt(m[3], 10, 64)
+					switch len(m[3]) {
+					case 1:
+						ms *= 100
+					case 2:
+						ms *= 10
+					}
+				}
+				tMs := (min*60+sec)*1000 + ms
 				lyrics.Lines = append(lyrics.Lines, LyricLine{TimeMs: tMs, Text: cleanLine})
 			}
 		} else if !hasLRC {
@@ -306,36 +412,17 @@ func parseLRC(raw string, durationMs int64) (*Lyrics, error) {
 		}
 	}
 
-	// If no synced timestamps were found, interpolate across track duration
-	if !hasLRC && len(lyrics.Lines) > 0 {
-		lyrics.Synced = true
-		interpolateTimestamps(lyrics.Lines, durationMs)
+	if hasLRC {
+		slices.SortStableFunc(lyrics.Lines, func(a, b LyricLine) int {
+			return cmp.Compare(a.TimeMs, b.TimeMs)
+		})
 	}
 
+	// Plain lyrics keep Synced false and carry no timestamps.
 	if len(lyrics.Lines) == 0 {
 		return nil, errors.New("empty lyrics")
 	}
 	return lyrics, nil
-}
-
-func interpolateTimestamps(lines []LyricLine, durationMs int64) {
-	n := len(lines)
-	if n == 0 {
-		return
-	}
-	if durationMs <= 0 {
-		durationMs = 240000 // default 4 minutes
-	}
-	intro := min(12000, durationMs/10)
-	outro := min(12000, durationMs/10)
-	body := durationMs - intro - outro
-	if body <= 0 {
-		body = durationMs
-		intro = 0
-	}
-	for i := range lines {
-		lines[i].TimeMs = intro + int64(float64(body)*float64(i)/float64(n))
-	}
 }
 
 // ResolveStream resolves playable audio for videoID (direct MP4 or HLS).
@@ -368,42 +455,44 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 			c.setPlayerAuth(req)
 
 			resp, err := c.httpClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
+			if err == nil {
 				defer resp.Body.Close()
-				var pResp map[string]any
-				if json.NewDecoder(resp.Body).Decode(&pResp) == nil {
-					sd, _ := pResp["streamingData"].(map[string]any)
-					if sd != nil {
-						if f := pickAndroidAudio(sd); f != nil {
-							u, _ := f["url"].(string)
-							durMs := int64(0)
-							if dStr, ok := f["approxDurationMs"].(string); ok {
-								durMs, _ = strconv.ParseInt(dStr, 10, 64)
-							}
-							sampleRate := 44100
-							if sr, ok := f["audioSampleRate"].(string); ok {
-								if v, err := strconv.Atoi(sr); err == nil && v > 0 {
-									sampleRate = v
+				if resp.StatusCode == http.StatusOK {
+					var pResp map[string]any
+					if json.NewDecoder(resp.Body).Decode(&pResp) == nil {
+						sd, _ := pResp["streamingData"].(map[string]any)
+						if sd != nil {
+							if f := pickAndroidAudio(sd); f != nil {
+								u, _ := f["url"].(string)
+								durMs := int64(0)
+								if dStr, ok := f["approxDurationMs"].(string); ok {
+									durMs, _ = strconv.ParseInt(dStr, 10, 64)
 								}
+								sampleRate := 44100
+								if sr, ok := f["audioSampleRate"].(string); ok {
+									if v, err := strconv.Atoi(sr); err == nil && v > 0 {
+										sampleRate = v
+									}
+								}
+								channels := 2
+								if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
+									channels = int(ch)
+								}
+								contentLength := int64(0)
+								if cl, ok := f["contentLength"].(string); ok {
+									contentLength, _ = strconv.ParseInt(cl, 10, 64)
+								}
+								return &StreamInfo{
+									VideoID:       videoID,
+									DirectURL:     u,
+									Format:        "mp4",
+									SampleRate:    sampleRate,
+									Channels:      channels,
+									DurationMs:    durMs,
+									ContentLength: contentLength,
+									HEAAC:         strings.Contains(u, "heaudio"),
+								}, nil
 							}
-							channels := 2
-							if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
-								channels = int(ch)
-							}
-							contentLength := int64(0)
-							if cl, ok := f["contentLength"].(string); ok {
-								contentLength, _ = strconv.ParseInt(cl, 10, 64)
-							}
-							return &StreamInfo{
-								VideoID:       videoID,
-								DirectURL:     u,
-								Format:        "mp4",
-								SampleRate:    sampleRate,
-								Channels:      channels,
-								DurationMs:    durMs,
-								ContentLength: contentLength,
-								HEAAC:         strings.Contains(u, "heaudio"),
-							}, nil
 						}
 					}
 				}

@@ -16,7 +16,7 @@ import (
 )
 
 func TestNavigation(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -49,7 +49,7 @@ func TestNavigation(t *testing.T) {
 }
 
 func TestSidebarTopRowAlignsWithHeader(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -65,7 +65,7 @@ func TestSidebarTopRowAlignsWithHeader(t *testing.T) {
 }
 
 func TestSidebarTopRowClearsLeftWindowControls(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.route = route{page: pageExplore}
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.SetTitleBar(ui.TitleBar{Height: 52, Left: 78})
@@ -87,7 +87,7 @@ func TestSidebarTopRowClearsLeftWindowControls(t *testing.T) {
 }
 
 func TestHomeCardTitlesStartAtSameHeight(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	longTitle := "2026流行华语歌曲 - 华语流行歌曲2026 (中国音乐2026排行榜)"
 	a.homeSections = []ytmusic.Section{{
 		Title: "再听一遍",
@@ -119,7 +119,7 @@ func TestHomeCardTitlesStartAtSameHeight(t *testing.T) {
 }
 
 func TestBodyTextSelectionCopies(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -137,7 +137,7 @@ func TestBodyTextSelectionCopies(t *testing.T) {
 }
 
 func TestTrackRowContextMenuCopies(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.open(route{page: pagePlaylist, id: "pl1"})
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
@@ -164,7 +164,7 @@ func TestTrackRowContextMenuCopies(t *testing.T) {
 }
 
 func TestCardContextMenuCopies(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -182,7 +182,7 @@ func TestCardContextMenuCopies(t *testing.T) {
 }
 
 func TestExploreMoodCategory(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	const categoryID = "FEmusic_moods_and_genres_category"
 	const categoryParams = "ggMPOg1uX2hXVUQwc0JTNXlE"
 	a.route = route{page: pageExplore}
@@ -230,7 +230,7 @@ func TestExploreMoodCategory(t *testing.T) {
 }
 
 func TestMoodButtonsEachColumnOpensItsCategory(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	const id = "FEmusic_moods_and_genres_category"
 	a.route = route{page: pageExplore}
 
@@ -259,7 +259,7 @@ func TestMoodButtonsEachColumnOpensItsCategory(t *testing.T) {
 }
 
 func TestMouseSideButtonsNavigateHistory(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.history = []route{{page: pageHome}}
 	a.route = route{page: pageExplore}
 
@@ -280,7 +280,7 @@ func TestMouseSideButtonsNavigateHistory(t *testing.T) {
 }
 
 func TestSectionMoreOpensAllItems(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	var items []ytmusic.CardItem
 	for i := 0; i < 20; i++ {
 		items = append(items, ytmusic.CardItem{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("卡片 %d", i), Type: "playlist"})
@@ -302,7 +302,7 @@ func TestSectionMoreOpensAllItems(t *testing.T) {
 }
 
 func TestSectionArrowsPageCarousel(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	var items []ytmusic.CardItem
 	for i := 0; i < 20; i++ {
 		items = append(items, ytmusic.CardItem{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("卡片 %d", i), Type: "playlist"})
@@ -335,7 +335,7 @@ func TestSectionArrowsPageCarousel(t *testing.T) {
 }
 
 func TestMoodSectionArrowsPage(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.route = route{page: pageExplore}
 	var items []ytmusic.CardItem
 	for i := 0; i < 30; i++ {
@@ -366,7 +366,7 @@ func TestMoodSectionArrowsPage(t *testing.T) {
 }
 
 func TestPlaylistShowsLoadMoreFooter(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.playlists["pl1"].Continuation = "next-page"
 	a.route = route{page: pagePlaylist, id: "pl1"}
 
@@ -378,7 +378,7 @@ func TestPlaylistShowsLoadMoreFooter(t *testing.T) {
 }
 
 func TestChartsShowsCountrySelector(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.route = route{page: pageCharts}
 	a.chartCountries = []ytmusic.ChartCountry{
 		{Code: "NG", Name: "尼日利亚"},
@@ -401,7 +401,7 @@ func TestChartsShowsCountrySelector(t *testing.T) {
 }
 
 func TestSearchAlbumCardOpensAlbum(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	r := route{page: pageSearch, query: "毛不易", kind: ytmusic.SearchAlbums}
 	a.route = r
 	a.searches[r] = &ytmusic.SearchResult{Albums: []ytmusic.AlbumItem{{ID: "MPREb_1", Title: "平凡的一天", Artist: "专辑，毛不易"}}}
@@ -422,7 +422,7 @@ func TestSearchAlbumCardOpensAlbum(t *testing.T) {
 }
 
 func TestVideoToggleOnlyForVideoTracks(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	video := ytmusic.Track{ID: "video1", Title: "Music Video", Video: true, DurationMs: 200000}
 	a.pl.SetQueue([]ytmusic.Track{video}, 0)
 	a.nowPlayingOpen = true
@@ -444,7 +444,7 @@ func TestVideoToggleOnlyForVideoTracks(t *testing.T) {
 }
 
 func TestArtistPageMixedArtistCardOpensArtist(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.route = route{page: pageArtist, id: "UCmain"}
 	a.artists["UCmain"] = &ytmusic.Artist{
 		ID:   "UCmain",
@@ -471,7 +471,7 @@ func TestArtistPageMixedArtistCardOpensArtist(t *testing.T) {
 }
 
 func TestArtistPageMixedTrackCardPlays(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.route = route{page: pageArtist, id: "UCmain"}
 	a.artists["UCmain"] = &ytmusic.Artist{
 		ID:   "UCmain",
@@ -496,7 +496,7 @@ func TestArtistPageMixedTrackCardPlays(t *testing.T) {
 }
 
 func TestSearchFlow(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -528,7 +528,7 @@ func TestSearchFlow(t *testing.T) {
 }
 
 func TestPlaylistViewAndPlay(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.open(route{page: pagePlaylist, id: "pl1"})
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
@@ -558,8 +558,34 @@ func TestPlaylistViewAndPlay(t *testing.T) {
 	}
 }
 
+func TestActiveLyricLine(t *testing.T) {
+	lines := []ytmusic.LyricLine{
+		{TimeMs: 5000, Text: "一"},
+		{TimeMs: 10000, Text: "二"},
+		{TimeMs: 15000, Text: "三"},
+	}
+	cases := []struct {
+		pos  time.Duration
+		want int
+	}{
+		{0, -1},
+		{4999 * time.Millisecond, -1},
+		{5000 * time.Millisecond, 0},
+		{12000 * time.Millisecond, 1},
+		{20000 * time.Millisecond, 2},
+	}
+	for _, tc := range cases {
+		if got := activeLyricLine(lines, true, tc.pos); got != tc.want {
+			t.Errorf("activeLyricLine(%v) = %d, want %d", tc.pos, got, tc.want)
+		}
+	}
+	if got := activeLyricLine(lines, false, 20*time.Second); got != -1 {
+		t.Errorf("plain lyrics active line = %d, want -1", got)
+	}
+}
+
 func TestToggleLikeFillsDurationFromPlayer(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
 		return &ytmusic.StreamInfo{VideoID: id, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
 	}
@@ -582,8 +608,20 @@ func TestToggleLikeFillsDurationFromPlayer(t *testing.T) {
 	}
 }
 
+func TestToggleLikePersistsAcrossRestore(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppAt(t, dir)
+	a.toggleLike(ytmusic.Track{ID: "track1", Title: "晴天", DurationMs: 269000})
+
+	b := newTestAppAt(t, dir)
+	b.restoreLibraryCache()
+	if len(b.liked) != 1 || b.liked[0].ID != "track1" {
+		t.Fatalf("restored liked tracks = %+v, want track1", b.liked)
+	}
+}
+
 func TestLikedPageUnlikeRemovesTrack(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "liked1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	t2 := ytmusic.Track{ID: "liked2", Title: "七里香", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 299000}
 	a.liked = []ytmusic.Track{t1, t2}
@@ -611,7 +649,7 @@ func TestLikedPageUnlikeRemovesTrack(t *testing.T) {
 }
 
 func TestLikedTracksBackfillDuration(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.liked = []ytmusic.Track{{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}}}
 	a.playlists["LM"] = &ytmusic.Playlist{
 		ID:     "LM",
@@ -632,7 +670,7 @@ func TestLikedTracksBackfillDuration(t *testing.T) {
 }
 
 func TestLikedPlaylistUnlikeRemovesTrack(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "liked1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	t2 := ytmusic.Track{ID: "liked2", Title: "七里香", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 299000}
 	a.liked = []ytmusic.Track{t1, t2}
@@ -661,7 +699,7 @@ func TestLikedPlaylistUnlikeRemovesTrack(t *testing.T) {
 }
 
 func TestAlbumAndArtistNavigation(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 
 	// Open Album
 	a.open(route{page: pageAlbum, id: "al1"})
@@ -686,7 +724,7 @@ func TestAccountAndSettingsModals(t *testing.T) {
 	}()
 	openWebLoginWindow = func(a *app) {}
 
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -741,7 +779,7 @@ func TestAccountAndSettingsModals(t *testing.T) {
 }
 
 func TestSignOutRefreshesInterface(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.profile = &ytmusic.Profile{Name: "测试用户"}
 	a.libraryPlaylists = []ytmusic.PlaylistItem{{ID: "pl_test", Title: "私人歌单"}}
 	a.liked = []ytmusic.Track{{ID: "liked_1", Title: "喜欢歌曲"}}
@@ -779,7 +817,7 @@ func TestSignOutRefreshesInterface(t *testing.T) {
 }
 
 func TestDoubleClickTopBarMaximize(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -790,7 +828,7 @@ func TestDoubleClickTopBarMaximize(t *testing.T) {
 }
 
 func TestNowPlayingQueue(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	t2 := ytmusic.Track{ID: "track2", Title: "七里香", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 299000}
 	t3 := ytmusic.Track{ID: "track3", Title: "搁浅", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 240000}
@@ -821,7 +859,7 @@ func TestNowPlayingQueue(t *testing.T) {
 }
 
 func TestNowPlayingRelatedTab(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	current := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	a.pl.SetQueue([]ytmusic.Track{current}, 0)
 
@@ -875,14 +913,14 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	userDataDir = func() (string, error) { return dir, nil }
 	defer func() { userDataDir = oldUserDataDir }()
 
-	a := newTestApp()
+	a := newTestAppAt(t, dir)
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", DurationMs: 269000}
 	t2 := ytmusic.Track{ID: "track2", Title: "七里香", DurationMs: 299000}
 	a.pl.SetQueue([]ytmusic.Track{t1, t2}, 1)
 	a.pl.Seek(42 * time.Second)
 	a.savePlayerSession()
 
-	b := newTestApp()
+	b := newTestAppAt(t, dir)
 	b.restorePlayerSession()
 	if b.pl.Current() == nil || b.pl.Current().ID != "track2" {
 		t.Fatalf("restored current = %+v", b.pl.Current())
@@ -896,7 +934,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	a.liked = []ytmusic.Track{t1}
 	a.saveLibraryCache()
 
-	c := newTestApp()
+	c := newTestAppAt(t, dir)
 	c.restoreLibraryCache()
 	if len(c.libraryPlaylists) != 1 || c.libraryPlaylists[0].ID != "pl1" {
 		t.Fatalf("restored playlists = %+v", c.libraryPlaylists)
@@ -906,7 +944,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	}
 
 	c.deleteLibraryCache()
-	d := newTestApp()
+	d := newTestApp(t)
 	d.restoreLibraryCache()
 	if len(d.libraryPlaylists) != 0 || len(d.liked) != 0 {
 		t.Fatal("deleted library cache should not restore")
@@ -914,7 +952,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 }
 
 func TestLyricsManualScroll(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	track := ytmusic.Track{ID: "track-lyrics", Title: "测试曲目", Artists: []ytmusic.ArtistRef{{Name: "测试歌手"}}, DurationMs: 300000}
 	a.pl.SetQueue([]ytmusic.Track{track}, 0)
 	lines := make([]ytmusic.LyricLine, 40)
@@ -959,7 +997,7 @@ func TestLyricsManualScroll(t *testing.T) {
 }
 
 func TestPlayerBarLoadingState(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
@@ -995,7 +1033,7 @@ func TestPlayerBarLoadingState(t *testing.T) {
 }
 
 func TestPlayerLikeButtonNearTitle(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	track := ytmusic.Track{ID: "track-like", Title: "测试曲目", Artists: []ytmusic.ArtistRef{{Name: "测试歌手"}}, DurationMs: 180000}
 	a.pl.SetQueue([]ytmusic.Track{track}, 0)
 
@@ -1019,7 +1057,7 @@ func TestPlayerLikeButtonNearTitle(t *testing.T) {
 }
 
 func TestNowPlayingAndLyrics(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	a.pl.SetQueue([]ytmusic.Track{t1}, 0)
 
@@ -1042,7 +1080,7 @@ func TestNowPlayingAndLyrics(t *testing.T) {
 }
 
 func TestIdleFrameBudget(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Advance(time.Second)
 	tt.Frame()
@@ -1053,7 +1091,7 @@ func TestIdleFrameBudget(t *testing.T) {
 }
 
 func TestRenderScenes(t *testing.T) {
-	outDir := "/tmp/ytmusic-frames"
+	outDir := t.TempDir()
 	_ = os.MkdirAll(outDir, 0o755)
 
 	scenes := []struct {
@@ -1103,7 +1141,7 @@ func TestRenderScenes(t *testing.T) {
 	}
 
 	for _, sc := range scenes {
-		a := newTestApp()
+		a := newTestApp(t)
 		sc.prep(a)
 		tt := ui.NewTester(a.view, 1200, 800)
 		tt.SetDark(sc.dark)

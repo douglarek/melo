@@ -17,12 +17,17 @@ type SessionData struct {
 	Profile *Profile `json:"profile,omitempty"`
 }
 
+// ErrSessionStale means a response belongs to a session that has since been
+// replaced or cleared.
+var ErrSessionStale = errors.New("ytmusic: stale session")
+
 var (
 	sessionMu      sync.RWMutex
 	currentSession *SessionData
+	sessionGen     uint64
 )
 
-func sessionFile() (string, error) {
+var sessionFile = func() (string, error) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
 		return "", err
@@ -43,40 +48,79 @@ func writeSessionBytes(b []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
-}
 
-func deleteSessionBytes() {
-	path, err := sessionFile()
-	if err == nil {
-		_ = os.Remove(path)
-	}
-}
-
-// SaveSession persists the session data.
-func SaveSession(sess *SessionData) error {
-	sessionMu.Lock()
-	defer sessionMu.Unlock()
-	currentSession = sess
-
-	b, err := json.Marshal(sess)
+	tmp, err := os.CreateTemp(dir, ".session-*.tmp")
 	if err != nil {
 		return err
 	}
-	return writeSessionBytes(b)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func deleteSessionBytes() error {
+	path, err := sessionFile()
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func cloneSession(sess *SessionData) *SessionData {
+	if sess == nil {
+		return nil
+	}
+	clone := *sess
+	if sess.Profile != nil {
+		profile := *sess.Profile
+		clone.Profile = &profile
+	}
+	return &clone
+}
+
+// SaveSession persists session data and makes it current.
+func SaveSession(sess *SessionData) error {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	if sess == nil {
+		return errors.New("ytmusic: nil session")
+	}
+
+	clone := cloneSession(sess)
+	b, err := json.Marshal(clone)
+	if err != nil {
+		return err
+	}
+	if err := writeSessionBytes(b); err != nil {
+		return err
+	}
+	currentSession = clone
+	sessionGen++
+	return nil
 }
 
 // LoadSession restores saved session data.
 func LoadSession() (*SessionData, error) {
-	sessionMu.Lock()
-	defer sessionMu.Unlock()
-
 	b, err := readSessionBytes()
 	if err != nil || len(b) == 0 {
 		return nil, errors.New("no saved session")
@@ -87,25 +131,70 @@ func LoadSession() (*SessionData, error) {
 		return nil, err
 	}
 
-	currentSession = &sess
-	DefaultClient.SetAuth(sess.Cookie)
-	return &sess, nil
-}
-
-// ClearSession clears the stored session.
-func ClearSession() {
 	sessionMu.Lock()
-	defer sessionMu.Unlock()
-	currentSession = nil
-	DefaultClient.SetAuth("")
-	deleteSessionBytes()
+	currentSession = cloneSession(&sess)
+	sessionGen++
+	sessionMu.Unlock()
+
+	DefaultClient.SetAuth(sess.Cookie)
+	return cloneSession(&sess), nil
 }
 
-// CurrentSession returns the active in-memory session.
+// ClearSession clears the in-memory session and removes the persisted file.
+func ClearSession() error {
+	sessionMu.Lock()
+	currentSession = nil
+	sessionGen++
+	sessionMu.Unlock()
+
+	DefaultClient.SetAuth("")
+	return deleteSessionBytes()
+}
+
+// CurrentSession returns a snapshot of the active in-memory session.
 func CurrentSession() *SessionData {
 	sessionMu.RLock()
 	defer sessionMu.RUnlock()
-	return currentSession
+	return cloneSession(currentSession)
+}
+
+// SessionSnapshot returns a snapshot of the current session and the generation
+// that identifies it.
+func SessionSnapshot() (SessionData, uint64, bool) {
+	sessionMu.RLock()
+	defer sessionMu.RUnlock()
+	if currentSession == nil {
+		return SessionData{}, 0, false
+	}
+	return *cloneSession(currentSession), sessionGen, true
+}
+
+func sessionGeneration() (uint64, bool) {
+	sessionMu.RLock()
+	defer sessionMu.RUnlock()
+	return sessionGen, currentSession != nil
+}
+
+// UpdateSessionCookie applies a cookie refresh to the matching session
+// generation.
+func UpdateSessionCookie(gen uint64, cookie string) error {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	if currentSession == nil || sessionGen != gen {
+		return ErrSessionStale
+	}
+
+	clone := cloneSession(currentSession)
+	clone.Cookie = cookie
+	b, err := json.Marshal(clone)
+	if err != nil {
+		return err
+	}
+	if err := writeSessionBytes(b); err != nil {
+		return err
+	}
+	currentSession = clone
+	return nil
 }
 
 // Account fetches the logged-in user profile from YouTube Music.

@@ -10,6 +10,24 @@ import (
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
+// activeLyricLine returns the last line whose timestamp has been reached, or
+// -1 for plain lyrics.
+func activeLyricLine(lines []ytmusic.LyricLine, synced bool, pos time.Duration) int {
+	if !synced {
+		return -1
+	}
+	curMs := pos.Milliseconds()
+	active := -1
+	for i, line := range lines {
+		if curMs >= line.TimeMs {
+			active = i
+		} else {
+			break
+		}
+	}
+	return active
+}
+
 func (a *app) nowPlayingView(c *ui.Context) {
 	p := a.pal
 	cur := a.pl.Current()
@@ -91,6 +109,9 @@ func (a *app) nowPlayingView(c *ui.Context) {
 				ui.Column(c).Grow(1).Basis(0).FillHeight().Children(func() {
 					ui.Row(c).FillWidth().Height(40).AlignItems(ui.Center).Gap(20).Children(func() {
 						ui.Text(c, "歌词").FontSize(18).Bold().TextColor(p.text)
+						if a.lyrics != nil && !a.lyrics.Synced {
+							ui.Text(c, "未同步").FontSize(11).TextColor(p.faint)
+						}
 						if a.npLyricsManual {
 							followBtn := ui.Row(c.Key("lyrics-follow")).Height(28).Radius(14).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 							if followBtn.Hovered() {
@@ -124,19 +145,10 @@ func (a *app) nowPlayingView(c *ui.Context) {
 							return
 						}
 
-						// Synchronized lyric scrolling
-						curMs := a.pl.Position().Milliseconds()
-						curLine := -1
-						for i, l := range a.lyrics.Lines {
-							if curMs >= l.TimeMs {
-								curLine = i
-							} else {
-								break
-							}
-						}
-						if curLine < 0 && len(a.lyrics.Lines) > 0 {
-							curLine = 0
-						}
+						// Synchronized lyric scrolling. Plain lyrics have no
+						// active line.
+						synced := a.lyrics.Synced
+						curLine := activeLyricLine(a.lyrics.Lines, synced, a.pl.Position())
 
 						// Calculate target scroll offset (approx 46px per line, center active line at ~35% height)
 						const lineStep = float32(46)
@@ -173,13 +185,16 @@ func (a *app) nowPlayingView(c *ui.Context) {
 								for i, line := range a.lyrics.Lines {
 									idx := i
 									l := line
-									active := idx == curLine
+									active := synced && idx == curLine
 
-									lineBox := ui.Row(c.Key(fmt.Sprintf("lyric-row-%d", idx))).FillWidth().Radius(8).Padding(6, 12).Cursor(ui.CursorPointer)
+									lineBox := ui.Row(c.Key(fmt.Sprintf("lyric-row-%d", idx))).FillWidth().Radius(8).Padding(6, 12)
+									if synced {
+										lineBox.Cursor(ui.CursorPointer)
+									}
 									if lineBox.Hovered() && !active {
 										lineBox.Background(p.hover)
 									}
-									if lineBox.Clicked() {
+									if synced && lineBox.Clicked() {
 										a.npLyricsManual = false
 										a.npCurrentY = a.npLyricScroll.Y
 										a.pl.Seek(time.Duration(l.TimeMs) * time.Millisecond)

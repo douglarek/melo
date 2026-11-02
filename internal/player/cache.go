@@ -134,8 +134,8 @@ func (c *Cache) Lookup(videoID string) ([]byte, *ytmusic.StreamInfo, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	audioPath := filepath.Join(c.dir, videoID+".aac")
-	metaPath := filepath.Join(c.dir, videoID+".json")
+	audioPath := c.Path(videoID, "aac")
+	metaPath := c.Path(videoID, "json")
 
 	data, err := os.ReadFile(audioPath)
 	if err != nil {
@@ -156,27 +156,58 @@ func (c *Cache) Lookup(videoID string) ([]byte, *ytmusic.StreamInfo, bool) {
 	return data, &info, true
 }
 
-// Save keeps a complete audio track and its metadata in cache.
-func (c *Cache) Save(videoID string, info *ytmusic.StreamInfo, audioData []byte) {
+// Save writes a complete audio file and its metadata to the cache and returns
+// any write error.
+func (c *Cache) Save(videoID string, info *ytmusic.StreamInfo, audioData []byte) error {
 	if c == nil || len(audioData) == 0 {
-		return
+		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if err := os.MkdirAll(c.dir, 0o700); err != nil {
-		return
+		return err
 	}
 
-	audioPath := filepath.Join(c.dir, videoID+".aac")
-	metaPath := filepath.Join(c.dir, videoID+".json")
+	audioPath := c.Path(videoID, "aac")
+	metaPath := c.Path(videoID, "json")
 
-	metaBytes, _ := json.Marshal(info)
-	_ = os.WriteFile(audioPath+".tmp", audioData, 0o600)
-	_ = os.Rename(audioPath+".tmp", audioPath)
-	_ = os.WriteFile(metaPath, metaBytes, 0o600)
+	metaBytes, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	if err := writeCacheFile(audioPath, audioData); err != nil {
+		return err
+	}
+	if err := writeCacheFile(metaPath, metaBytes); err != nil {
+		return err
+	}
 
 	c.pruneLocked()
+	return nil
+}
+
+func writeCacheFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func (c *Cache) pruneLocked() {

@@ -108,23 +108,59 @@ func TestSearchTypeParam(t *testing.T) {
 }
 
 func TestParseLyrics(t *testing.T) {
-	rawLines := []string{"[00:12.34]第一行歌词", "[00:25.00]第二行歌词", "普通歌词没有时间戳"}
-	lyrics := &Lyrics{}
-	for _, l := range rawLines {
-		m := lrcTimestampReg.FindStringSubmatch(l)
-		if len(m) > 0 {
-			lyrics.Synced = true
-			lyrics.Lines = append(lyrics.Lines, LyricLine{TimeMs: 12340, Text: "第一行歌词"})
-		} else {
-			lyrics.Lines = append(lyrics.Lines, LyricLine{Text: l})
+	lyrics, err := parseLRC("[00:12.34]第一行歌词\n[00:25.00]第二行歌词", 0)
+	if err != nil {
+		t.Fatalf("parse lyrics: %v", err)
+	}
+	if !lyrics.Synced || len(lyrics.Lines) != 2 {
+		t.Fatalf("synced=%v lines=%d, want 2 synced lines", lyrics.Synced, len(lyrics.Lines))
+	}
+	if lyrics.Lines[0].TimeMs != 12340 || lyrics.Lines[0].Text != "第一行歌词" {
+		t.Fatalf("first line = %+v", lyrics.Lines[0])
+	}
+	if lyrics.Lines[1].TimeMs != 25000 || lyrics.Lines[1].Text != "第二行歌词" {
+		t.Fatalf("second line = %+v", lyrics.Lines[1])
+	}
+}
+
+func TestParseLRCPlainLyricsNotSynced(t *testing.T) {
+	lyrics, err := parseLRC("第一行\n第二行", 123000)
+	if err != nil {
+		t.Fatalf("parse lyrics: %v", err)
+	}
+	if lyrics.Synced {
+		t.Fatal("plain lyrics must not be marked synced")
+	}
+	for i, line := range lyrics.Lines {
+		if line.TimeMs != 0 {
+			t.Fatalf("line %d time = %d, want 0 for plain lyrics", i, line.TimeMs)
 		}
 	}
+}
 
-	if !lyrics.Synced {
-		t.Error("lyrics should be marked synced")
+func TestParseLRCResolvesSingleDecimal(t *testing.T) {
+	lyrics, err := parseLRC("[00:01.5]hello", 0)
+	if err != nil {
+		t.Fatalf("parse lyrics: %v", err)
 	}
-	if len(lyrics.Lines) != 3 {
-		t.Errorf("expected 3 lines, got %d", len(lyrics.Lines))
+	if len(lyrics.Lines) != 1 || lyrics.Lines[0].TimeMs != 1500 {
+		t.Fatalf("line = %+v, want 1500ms", lyrics.Lines)
+	}
+}
+
+func TestParseLRCMultipleTimestamps(t *testing.T) {
+	lyrics, err := parseLRC("[00:20.50][00:10.00]same\n[00:15.00]middle", 0)
+	if err != nil {
+		t.Fatalf("parse lyrics: %v", err)
+	}
+	want := []int64{10000, 15000, 20500}
+	if len(lyrics.Lines) != len(want) {
+		t.Fatalf("lines = %d, want %d", len(lyrics.Lines), len(want))
+	}
+	for i, ms := range want {
+		if lyrics.Lines[i].TimeMs != ms || lyrics.Lines[i].Text == "" {
+			t.Fatalf("line %d = %+v, want %dms", i, lyrics.Lines[i], ms)
+		}
 	}
 }
 

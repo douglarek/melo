@@ -338,6 +338,14 @@ func TestParseResponsiveArtistCardWithPlayVideoID(t *testing.T) {
 	}
 }
 
+func TestParseAlbumUnavailableResponseReturnsError(t *testing.T) {
+	for _, data := range []string{`{}`, `{"contents":{}}`, `{"contents":{"twoColumnBrowseResultsRenderer":{}}}`} {
+		if _, err := parseAlbumResponse([]byte(data), "MPREb_missing"); err == nil {
+			t.Fatalf("parseAlbumResponse(%s) returned no error", data)
+		}
+	}
+}
+
 func TestHasMusicVideo(t *testing.T) {
 	nav := func(videoType string) map[string]any {
 		return map[string]any{

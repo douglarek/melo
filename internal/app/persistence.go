@@ -87,9 +87,16 @@ func (a *app) restorePlayerSession() {
 }
 
 func (a *app) saveLibraryCache() {
+	liked := &ytmusic.Playlist{ID: "LM", Title: "我喜欢的音乐"}
+	if pl := a.playlists["LM"]; pl != nil {
+		*liked = *pl
+	}
+	liked.Tracks = append([]ytmusic.Track(nil), a.liked...)
+	liked.TrackCount = len(a.liked)
+
 	cache := libraryCache{
 		Playlists: a.libraryPlaylists,
-		Liked:     a.playlists["LM"],
+		Liked:     liked,
 	}
 	data, err := json.Marshal(cache)
 	if err != nil {

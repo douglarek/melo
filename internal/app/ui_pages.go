@@ -135,11 +135,16 @@ func (a *app) loadChartsCountry(c *ui.Context) {
 		return
 	}
 	code := a.chartCountry
+	a.chartsGen++
+	gen := a.chartsGen
 	a.chartsLoading = true
 	c.Invalidate()
 	go func() {
 		page, _ := ytmusic.DefaultClient.BrowseChartsPage(context.Background(), code)
 		a.post(func() {
+			if gen != a.chartsGen {
+				return
+			}
 			a.chartsLoading = false
 			if page == nil {
 				return

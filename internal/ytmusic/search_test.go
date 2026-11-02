@@ -39,6 +39,28 @@ func TestSearchAlbumResultWithPlayVideoIDIsNotATrack(t *testing.T) {
 	}
 }
 
+func TestExtractDurationIgnoresClockShapedTitle(t *testing.T) {
+	r := map[string]any{
+		"flexColumns": []any{
+			flexColumn("11:11"),
+			map[string]any{
+				"musicResponsiveListItemFlexColumnRenderer": map[string]any{
+					"text": map[string]any{"runs": []any{
+						map[string]any{"text": "歌曲"},
+						map[string]any{"text": " • "},
+						map[string]any{"text": "周杰伦", "navigationEndpoint": map[string]any{"browseEndpoint": map[string]any{"browseId": "UC1"}}},
+						map[string]any{"text": " • "},
+						map[string]any{"text": "11:11", "navigationEndpoint": map[string]any{"browseEndpoint": map[string]any{"browseId": "MPRE1"}}},
+					}},
+				},
+			},
+		},
+	}
+	if got := extractDuration(r, r["flexColumns"].([]any)); got != 0 {
+		t.Fatalf("duration = %d, want 0 when only navigable clock-shaped metadata is available", got)
+	}
+}
+
 func TestSearchTrackWithoutBrowsePageStaysATrack(t *testing.T) {
 	r := map[string]any{
 		"flexColumns": []any{

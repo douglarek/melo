@@ -80,6 +80,11 @@ func (a *app) view(c *ui.Context) {
 			a.settingsModalView(c)
 		}
 	})
+
+	if a.authErr != "" {
+		c.Toast(a.authErr)
+		a.authErr = ""
+	}
 }
 
 func (a *app) sidebar(c *ui.Context) {

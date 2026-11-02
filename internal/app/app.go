@@ -61,10 +61,17 @@ type app struct {
 	accountModalOpen bool
 	loginWin         *mygo.Window
 	loginSession     *mygo.Session
+	authMu           sync.Mutex
+	authAttempt      uint64
+	authErr          string
 
 	// Persistence
 	saveMu    sync.Mutex
 	saveTimer *time.Timer
+
+	// Application lifetime
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Settings modal
 	settingsModalOpen bool
@@ -78,6 +85,7 @@ type app struct {
 	chartsLoading   bool
 	chartCountries  []ytmusic.ChartCountry
 	chartCountry    string
+	chartsGen       int
 
 	playlists     map[string]*ytmusic.Playlist
 	albums        map[string]*ytmusic.Album
@@ -142,7 +150,10 @@ func (a *app) post(fn func()) {
 
 // Run boots the application and launches the main window.
 func Run() error {
+	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{
+		ctx:         ctx,
+		cancel:      cancel,
 		playlists:   map[string]*ytmusic.Playlist{},
 		albums:      map[string]*ytmusic.Album{},
 		artists:     map[string]*ytmusic.Artist{},
@@ -183,6 +194,7 @@ func Run() error {
 
 		a.art = newArtCache(a.post)
 		a.pl = player.New(a.post)
+		a.pl.SetContext(a.ctx)
 		a.pl.Cache = songCache
 		a.pl.Changed = func() {
 			a.post(func() {
@@ -227,6 +239,12 @@ func Run() error {
 			a.quitting = true
 		})
 		mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+			if a.cancel != nil {
+				a.cancel()
+			}
+			if a.pl != nil {
+				_ = a.pl.Close()
+			}
 			if a.tray != nil {
 				a.tray.Destroy()
 			}
@@ -237,7 +255,7 @@ func Run() error {
 		})
 		a.restorePlayerSession()
 		a.boot()
-		go a.maintenanceLoop()
+		go a.maintenanceLoop(a.ctx)
 	})
 
 	return mygo.App.Run()
@@ -523,33 +541,50 @@ func (a *app) syncNowPlayingLyrics() {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
 
-		// 1. Try LRCLIB for synced LRC lyrics
-		artistName := t.ArtistNames()
-		durSec := int(t.DurationMs / 1000)
-		lrc, err := ytmusic.FetchLrcLibLyrics(ctx, t.Title, artistName, durSec)
-		if err == nil && lrc != nil && len(lrc.Lines) > 0 {
+		setLyrics := func(l *ytmusic.Lyrics) {
 			a.post(func() {
 				if a.lyricsLastVideoID == t.ID {
-					a.lyrics = lrc
+					a.lyrics = l
 					a.lyricsLoading = false
 				}
 			})
-			return
 		}
 
-		// 2. Fallback to YouTube Music browse lyrics
-		_, lyricsBrowseID, err := ytmusic.DefaultClient.GetNext(ctx, t.ID, "")
-		if err == nil && lyricsBrowseID != "" {
-			lyrics, err := ytmusic.DefaultClient.GetLyrics(ctx, lyricsBrowseID, t.DurationMs)
-			if err == nil {
-				a.post(func() {
-					if a.lyricsLastVideoID == t.ID {
-						a.lyrics = lyrics
-						a.lyricsLoading = false
-					}
-				})
+		// 1. YouTube Android timed lyrics.
+		var browseID string
+		_, browseID, _ = ytmusic.DefaultClient.GetNext(ctx, t.ID, "")
+		if browseID != "" {
+			timed, err := ytmusic.DefaultClient.GetTimedLyrics(ctx, browseID)
+			if err == nil && timed != nil && len(timed.Lines) > 0 {
+				setLyrics(timed)
 				return
 			}
+		}
+
+		// 2. LRCLIB lyrics.
+		var plain *ytmusic.Lyrics
+		lrc, err := ytmusic.FetchLrcLibLyrics(ctx, t.Title, t.ArtistNames(), int(t.DurationMs/1000))
+		if err == nil && lrc != nil && len(lrc.Lines) > 0 {
+			if lrc.Synced {
+				setLyrics(lrc)
+				return
+			}
+			plain = lrc
+		}
+
+		// 3. YouTube Music plain lyrics.
+		if browseID != "" {
+			lyrics, err := ytmusic.DefaultClient.GetLyrics(ctx, browseID, t.DurationMs)
+			if err == nil && lyrics != nil && len(lyrics.Lines) > 0 {
+				setLyrics(lyrics)
+				return
+			}
+		}
+
+		// 4. LRCLIB plain lyrics.
+		if plain != nil {
+			setLyrics(plain)
+			return
 		}
 		a.post(func() {
 			if a.lyricsLastVideoID == t.ID {
@@ -563,6 +598,7 @@ func (a *app) toggleLike(track ytmusic.Track) {
 	for i, t := range a.liked {
 		if t.ID == track.ID {
 			a.liked = append(a.liked[:i], a.liked[i+1:]...)
+			a.saveLibraryCache()
 			if a.profile != nil {
 				go func(id string) {
 					ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -580,6 +616,7 @@ func (a *app) toggleLike(track ytmusic.Track) {
 		}
 	}
 	a.liked = append([]ytmusic.Track{track}, a.liked...)
+	a.saveLibraryCache()
 	if a.profile != nil {
 		go func(id string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -595,10 +632,15 @@ func (a *app) applyResolvedDuration(id string, durationMs int64) {
 	if durationMs <= 0 {
 		return
 	}
+	changed := false
 	for i := range a.liked {
 		if a.liked[i].ID == id && a.liked[i].DurationMs <= 0 {
 			a.liked[i].DurationMs = durationMs
+			changed = true
 		}
+	}
+	if changed {
+		a.saveLibraryCache()
 	}
 }
 

@@ -360,38 +360,26 @@ func extractDuration(r map[string]any, flexCols []any) int64 {
 		}
 	}
 
-	// 3. Check all flexColumns
-	for _, col := range flexCols {
-		colMap, _ := col.(map[string]any)
+	// 3. Use the last non-navigable run of the subtitle as a duration
+	// candidate.
+	if len(flexCols) > 0 {
+		colMap, _ := flexCols[len(flexCols)-1].(map[string]any)
 		colFlex, _ := colMap["musicResponsiveListItemFlexColumnRenderer"].(map[string]any)
-		text := colFlex["text"]
-		// Check individual runs
-		if m, ok := text.(map[string]any); ok {
-			if runs, ok := m["runs"].([]any); ok {
-				for _, run := range runs {
-					runMap, _ := run.(map[string]any)
-					rText, _ := runMap["text"].(string)
-					rText = strings.TrimSpace(rText)
-					if strings.Contains(rText, ":") && !strings.Contains(rText, "http") {
-						if d := ParseDurationMs(rText); d > 0 {
-							return d
-						}
-					}
-				}
-			}
-		}
-		// Also check full text string
-		fullText := RunsToString(text)
-		parts := strings.Split(fullText, "•")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if strings.Contains(part, ":") {
-				if d := ParseDurationMs(part); d > 0 {
+		text, _ := colFlex["text"].(map[string]any)
+		runs, _ := text["runs"].([]any)
+		if len(runs) > 0 {
+			last, _ := runs[len(runs)-1].(map[string]any)
+			if _, navigable := last["navigationEndpoint"]; !navigable {
+				raw, _ := last["text"].(string)
+				parts := strings.Split(raw, "•")
+				candidate := strings.TrimSpace(parts[len(parts)-1])
+				if d := ParseDurationMs(candidate); d > 0 {
 					return d
 				}
 			}
 		}
 	}
+
 	return 0
 }
 

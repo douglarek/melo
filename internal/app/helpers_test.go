@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"testing"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -11,8 +12,18 @@ import (
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
-func newTestApp() *app {
+func newTestApp(t *testing.T) *app {
+	t.Helper()
+	return newTestAppAt(t, t.TempDir())
+}
+
+func newTestAppAt(t *testing.T, dataDir string) *app {
+	t.Helper()
 	setThemeSource = func(src mygo.ThemeSource) {}
+
+	oldUserDataDir := userDataDir
+	userDataDir = func() (string, error) { return dataDir, nil }
+	t.Cleanup(func() { userDataDir = oldUserDataDir })
 
 	a := &app{
 		playlists:   map[string]*ytmusic.Playlist{},

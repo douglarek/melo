@@ -7,7 +7,7 @@ import (
 )
 
 func TestCloseToTraySetting(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.settingsModalOpen = true
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
@@ -40,7 +40,7 @@ func TestDefaultSettings(t *testing.T) {
 }
 
 func TestCacheSizeSetting(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.settingsModalOpen = true
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
@@ -60,7 +60,7 @@ func TestCacheSizeSetting(t *testing.T) {
 }
 
 func TestTrackNotificationsSetting(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp(t)
 	a.settingsModalOpen = true
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()

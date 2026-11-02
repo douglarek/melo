@@ -22,6 +22,10 @@ const (
 	clientName       = "WEB_REMIX"
 	clientVersion    = "1.20261027.10.00"
 	defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
+	androidMusicClientName    = "ANDROID_MUSIC"
+	androidMusicClientVersion = "7.27.52"
+	androidMusicUserAgent     = "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 11) gzip"
 )
 
 // Client is the YouTube Music API client.
@@ -62,6 +66,14 @@ func (c *Client) SetLanguage(lang string) {
 }
 
 func (c *Client) post(ctx context.Context, endpoint string, body map[string]any, q url.Values) ([]byte, error) {
+	return c.postWithClient(ctx, endpoint, body, q, nil, "")
+}
+
+// postWithClient performs a request with an optional client context override
+// and user agent. A nil override uses the WEB_REMIX client.
+func (c *Client) postWithClient(ctx context.Context, endpoint string, body map[string]any, q url.Values, clientOverride map[string]any, userAgent string) ([]byte, error) {
+	sessionGen, hasSession := sessionGeneration()
+
 	c.mu.RLock()
 	lang := c.language
 	reg := c.region
@@ -75,14 +87,19 @@ func (c *Client) post(ctx context.Context, endpoint string, body map[string]any,
 
 	reqURL := baseURL + endpoint + "?" + q.Encode()
 
+	client := map[string]any{
+		"clientName":    clientName,
+		"clientVersion": clientVersion,
+		"hl":            lang,
+		"gl":            reg,
+	}
+	for k, v := range clientOverride {
+		client[k] = v
+	}
+
 	payload := map[string]any{
 		"context": map[string]any{
-			"client": map[string]any{
-				"clientName":    clientName,
-				"clientVersion": clientVersion,
-				"hl":            lang,
-				"gl":            reg,
-			},
+			"client": client,
 			"user": map[string]any{
 				"lockedSafetyMode": false,
 			},
@@ -102,7 +119,10 @@ func (c *Client) post(ctx context.Context, endpoint string, body map[string]any,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", defaultUserAgent)
+	if userAgent == "" {
+		userAgent = defaultUserAgent
+	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Referer", "https://music.youtube.com/")
 	req.Header.Set("Origin", "https://music.youtube.com")
 
@@ -124,16 +144,20 @@ func (c *Client) post(ctx context.Context, endpoint string, body map[string]any,
 	}
 	defer resp.Body.Close()
 
-	// Capture and merge refreshed cookies from YouTube's response
+	// Merge refreshed cookies when the request's session generation is current.
 	if setCookies := resp.Cookies(); len(setCookies) > 0 && cookie != "" {
 		newCookie := mergeCookies(cookie, setCookies)
 		if newCookie != cookie {
-			c.mu.Lock()
-			c.cookie = newCookie
-			c.mu.Unlock()
-			if sess := CurrentSession(); sess != nil {
-				sess.Cookie = newCookie
-				_ = SaveSession(sess)
+			applied := true
+			if hasSession {
+				applied = UpdateSessionCookie(sessionGen, newCookie) == nil
+			}
+			if applied {
+				c.mu.Lock()
+				if c.cookie == cookie {
+					c.cookie = newCookie
+				}
+				c.mu.Unlock()
 			}
 		}
 	}

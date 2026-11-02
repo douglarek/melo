@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/douglarek/melo/internal/ytmusic"
 )
 
 func TestCachePathSanitizesVideoID(t *testing.T) {
@@ -19,6 +21,22 @@ func TestCachePathSanitizesVideoID(t *testing.T) {
 	}
 	if got := c.Path("..", "mp4"); filepath.Base(got) != "invalid.mp4" {
 		t.Fatalf("cache path for .. = %q, want invalid.mp4", got)
+	}
+}
+
+func TestCacheSaveAndLookupStayInsideCacheDir(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "cache")
+	c := NewCache(dir, 0)
+	info := &ytmusic.StreamInfo{VideoID: "../escape"}
+	if err := c.Save("../escape", info, []byte("audio")); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "escape.aac")); !os.IsNotExist(err) {
+		t.Fatal("cache wrote outside its directory")
+	}
+	if _, _, ok := c.Lookup("../escape"); !ok {
+		t.Fatal("sanitized cache entry was not found")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -15,6 +16,19 @@ import (
 var (
 	openWebLoginWindow = func(a *app) { a.openWebLogin() }
 )
+
+func (a *app) beginAuthAttempt() uint64 {
+	a.authMu.Lock()
+	defer a.authMu.Unlock()
+	a.authAttempt++
+	return a.authAttempt
+}
+
+func (a *app) authAttemptIsCurrent(attempt uint64) bool {
+	a.authMu.Lock()
+	defer a.authMu.Unlock()
+	return a.authAttempt == attempt
+}
 
 func (a *app) openLogin() {
 	a.accountModalOpen = true
@@ -136,6 +150,11 @@ func (a *app) openWebLogin() {
 		return
 	}
 
+	attempt := a.beginAuthAttempt()
+	done := make(chan struct{})
+	var doneOnce sync.Once
+	stop := func() { doneOnce.Do(func() { close(done) }) }
+
 	loginURL := "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F"
 	ua := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 
@@ -158,6 +177,14 @@ func (a *app) openWebLogin() {
 	win.Page().SetUserAgent(ua)
 
 	checkCookies := func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+		}
+		if !a.authAttemptIsCurrent(attempt) {
+			return true
+		}
 		cookies, err := loginSession.Cookies.List(mygo.CookieFilter{URL: "https://music.youtube.com"})
 		if err != nil || len(cookies) == 0 {
 			return false
@@ -177,7 +204,11 @@ func (a *app) openWebLogin() {
 
 		if hasSAPISID && hasSession {
 			cookieStr := strings.Join(parts, "; ")
+			stop()
 			a.post(func() {
+				if !a.authAttemptIsCurrent(attempt) {
+					return
+				}
 				if a.loginWin == win {
 					a.loginWin.Close()
 					a.loginWin = nil
@@ -185,7 +216,7 @@ func (a *app) openWebLogin() {
 				if a.loginSession == loginSession {
 					a.loginSession = nil
 				}
-				a.saveCookieSession(cookieStr)
+				a.saveCookieSession(cookieStr, attempt)
 			})
 			return true
 		}
@@ -202,17 +233,23 @@ func (a *app) openWebLogin() {
 	go func() {
 		ticker := time.NewTicker(1500 * time.Millisecond)
 		defer ticker.Stop()
-		for range ticker.C {
-			if a.loginWin == nil || a.profile != nil {
+		for {
+			select {
+			case <-done:
 				return
-			}
-			if checkCookies() {
-				return
+			case <-ticker.C:
+				if !a.authAttemptIsCurrent(attempt) {
+					return
+				}
+				if checkCookies() {
+					return
+				}
 			}
 		}
 	}()
 
 	win.OnClose(func(e *mygo.CloseEvent) {
+		stop()
 		a.post(func() {
 			if a.loginWin == win {
 				a.loginWin = nil
@@ -224,13 +261,20 @@ func (a *app) openWebLogin() {
 	})
 }
 
-func (a *app) saveCookieSession(cookie string) {
+func (a *app) saveCookieSession(cookie string, attempt uint64) {
 	cookie = strings.TrimSpace(cookie)
 	cookie = strings.TrimPrefix(cookie, "Cookie:")
 	cookie = strings.TrimPrefix(cookie, "cookie:")
 	cookie = strings.TrimSpace(cookie)
 
+	a.authMu.Lock()
+	if a.authAttempt != attempt {
+		a.authMu.Unlock()
+		return
+	}
 	ytmusic.DefaultClient.SetAuth(cookie)
+	a.authMu.Unlock()
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -248,9 +292,26 @@ func (a *app) saveCookieSession(cookie string) {
 			Cookie:  cookie,
 			Profile: prof,
 		}
-		_ = ytmusic.SaveSession(sess)
+		a.authMu.Lock()
+		if a.authAttempt != attempt {
+			a.authMu.Unlock()
+			return
+		}
+		err := ytmusic.SaveSession(sess)
+		a.authMu.Unlock()
+		if err != nil {
+			a.post(func() {
+				if a.authAttemptIsCurrent(attempt) {
+					a.authErr = "登录信息保存失败，请检查用户数据目录后重试"
+				}
+			})
+			return
+		}
 
 		a.post(func() {
+			if !a.authAttemptIsCurrent(attempt) {
+				return
+			}
 			a.profile = prof
 			a.accountModalOpen = false
 			a.clearDefaultBrowserData()
@@ -271,7 +332,14 @@ func (a *app) saveCookieSession(cookie string) {
 }
 
 func (a *app) signOut() {
-	ytmusic.ClearSession()
+	a.authMu.Lock()
+	a.authAttempt++
+	err := ytmusic.ClearSession()
+	a.authMu.Unlock()
+	if err != nil {
+		a.authErr = "退出登录未完全清除本地凭据，请重试"
+	}
+
 	a.clearDefaultBrowserData()
 	if a.loginWin != nil {
 		a.loginWin.Close()

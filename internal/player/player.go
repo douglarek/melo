@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"time"
 
@@ -44,6 +45,9 @@ type Player struct {
 	Cache            *Cache
 	Resolve          func(ctx context.Context, id string) (*ytmusic.StreamInfo, error)
 
+	ctx     context.Context
+	loadWG  sync.WaitGroup
+	closed  bool
 	queue   []ytmusic.Track
 	order   []int
 	at      int
@@ -80,6 +84,7 @@ type Player struct {
 func New(post func(func())) *Player {
 	p := &Player{
 		post:    post,
+		ctx:     context.Background(),
 		volume:  1.0,
 		at:      -1,
 		shuffle: false,
@@ -87,6 +92,53 @@ func New(post func(func())) *Player {
 	}
 	p.fade.setGain(p.volume)
 	return p
+}
+
+// SetContext replaces the parent context for future loads.
+func (p *Player) SetContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.mu.Lock()
+	p.ctx = ctx
+	p.mu.Unlock()
+}
+
+// Close stops playback and waits for the current load to return.
+func (p *Player) Close() error {
+	p.mu.Lock()
+	if !p.closed {
+		p.closed = true
+		p.loading = false
+		p.playing = false
+		p.pendingPlay = false
+		p.feed = nil
+		p.radioGen++
+		if p.cancelLoad != nil {
+			p.cancelLoad()
+			p.cancelLoad = nil
+		}
+		out := p.out
+		st := p.stream
+		p.out = nil
+		p.stream = nil
+		p.info = nil
+		p.fade.attach(nil, 1)
+		p.mu.Unlock()
+
+		if st != nil {
+			_ = st.Close()
+		}
+		if out != nil {
+			out.Pause()
+			out.Close()
+		}
+	} else {
+		p.mu.Unlock()
+	}
+
+	p.loadWG.Wait()
+	return nil
 }
 
 func (p *Player) changed() {
@@ -125,11 +177,21 @@ func (p *Player) Loading() bool {
 	return p.loading
 }
 
-// Current returns the track currently playing or paused.
+// Current returns a snapshot of the current track.
 func (p *Player) Current() *ytmusic.Track {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.track
+	if p.track == nil {
+		return nil
+	}
+	track := cloneTrack(*p.track)
+	return &track
+}
+
+func cloneTrack(track ytmusic.Track) ytmusic.Track {
+	track.Artists = slices.Clone(track.Artists)
+	track.Thumbnails = slices.Clone(track.Thumbnails)
+	return track
 }
 
 // Queue returns a copy of the current queue.
@@ -184,6 +246,50 @@ func (p *Player) Shuffle() bool {
 	return p.shuffle
 }
 
+func (p *Player) currentQueueIndexLocked() int {
+	if p.at >= 0 && p.at < len(p.order) {
+		return p.order[p.at]
+	}
+	return -1
+}
+
+// reorderLocked rebuilds the playback order, keeping current (a queue index)
+// as the current item. When shuffle is enabled the current item stays first.
+func (p *Player) reorderLocked(current int) {
+	n := len(p.queue)
+	p.order = make([]int, n)
+	for i := range p.order {
+		p.order[i] = i
+	}
+	if n == 0 {
+		p.at = -1
+		return
+	}
+	if current < 0 || current >= n {
+		p.at = -1
+		return
+	}
+
+	if p.shuffle && n > 1 {
+		rand.Shuffle(n, func(i, j int) {
+			p.order[i], p.order[j] = p.order[j], p.order[i]
+		})
+		for i, idx := range p.order {
+			if idx == current {
+				p.order[0], p.order[i] = p.order[i], p.order[0]
+				break
+			}
+		}
+	}
+	for i, idx := range p.order {
+		if idx == current {
+			p.at = i
+			return
+		}
+	}
+	p.at = -1
+}
+
 // SetShuffle enables or disables queue shuffling.
 func (p *Player) SetShuffle(s bool) {
 	p.mu.Lock()
@@ -191,8 +297,9 @@ func (p *Player) SetShuffle(s bool) {
 		p.mu.Unlock()
 		return
 	}
+	current := p.currentQueueIndexLocked()
 	p.shuffle = s
-	p.reorder()
+	p.reorderLocked(current)
 	p.mu.Unlock()
 	p.changed()
 }
@@ -220,51 +327,37 @@ func (p *Player) ToggleRepeat() {
 	p.changed()
 }
 
-func (p *Player) reorder() {
-	n := len(p.queue)
-	p.order = make([]int, n)
-	for i := range p.order {
-		p.order[i] = i
-	}
-	if p.shuffle && n > 1 {
-		// Keep current track at front if playing
-		curIdx := -1
-		if p.at >= 0 && p.at < len(p.order) {
-			curIdx = p.order[p.at]
-		}
-		rand.Shuffle(n, func(i, j int) {
-			p.order[i], p.order[j] = p.order[j], p.order[i]
-		})
-		if curIdx >= 0 {
-			for i, idx := range p.order {
-				if idx == curIdx {
-					p.order[0], p.order[i] = p.order[i], p.order[0]
-					p.at = 0
-					break
-				}
-			}
-		}
-	}
-}
-
 // SetQueue sets a new queue of tracks and immediately starts playback.
 func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 	p.mu.Lock()
+	if len(tracks) == 0 {
+		p.stop()
+		p.gen++
+		p.queue = nil
+		p.order = nil
+		p.at = -1
+		p.track = nil
+		p.info = nil
+		p.loading = false
+		p.playing = false
+		p.pendingPlay = false
+		p.feed = nil
+		p.radio = ""
+		p.radioGen++
+		p.mu.Unlock()
+		p.changed()
+		return
+	}
+
+	start := at
+	if start < 0 || start >= len(tracks) {
+		start = 0
+	}
 	p.queue = append([]ytmusic.Track(nil), tracks...)
-	p.reorder()
+	p.reorderLocked(start)
 	p.feed = nil
 	p.radio = ""
 	p.radioGen++
-	if at >= 0 && at < len(tracks) {
-		for i, idx := range p.order {
-			if idx == at {
-				p.at = i
-				break
-			}
-		}
-	} else {
-		p.at = 0
-	}
 	p.mu.Unlock()
 	p.playCurrent()
 }
@@ -282,20 +375,44 @@ func (p *Player) Append(tracks ...ytmusic.Track) {
 	for i := range tracks {
 		p.order = append(p.order, start+i)
 	}
+	if p.at < 0 && len(p.order) > 0 {
+		p.at = 0
+	}
 	p.mu.Unlock()
 	p.changed()
 }
 
-// InsertNext inserts tracks right after the current track.
+// InsertNext inserts tracks right after the current track in playback order.
 func (p *Player) InsertNext(tracks ...ytmusic.Track) {
+	if len(tracks) == 0 {
+		return
+	}
 	p.mu.Lock()
 	if len(p.queue) == 0 {
 		p.mu.Unlock()
 		p.SetQueue(tracks, 0)
 		return
 	}
+	start := len(p.queue)
 	p.queue = append(p.queue, tracks...)
-	p.reorder()
+
+	insertAt := p.at + 1
+	if insertAt < 0 {
+		insertAt = 0
+	}
+	if insertAt > len(p.order) {
+		insertAt = len(p.order)
+	}
+	order := make([]int, 0, len(p.order)+len(tracks))
+	order = append(order, p.order[:insertAt]...)
+	for i := range tracks {
+		order = append(order, start+i)
+	}
+	order = append(order, p.order[insertAt:]...)
+	p.order = order
+	if p.at < 0 {
+		p.at = 0
+	}
 	p.mu.Unlock()
 	p.changed()
 }
@@ -319,8 +436,13 @@ func (p *Player) stop() {
 }
 
 func (p *Player) playCurrent() {
+	resolver := p.Resolve
+	if resolver == nil {
+		resolver = ytmusic.DefaultClient.ResolveStream
+	}
+
 	p.mu.Lock()
-	if p.at < 0 || p.at >= len(p.order) {
+	if p.closed || p.at < 0 || p.at >= len(p.order) {
 		p.mu.Unlock()
 		return
 	}
@@ -341,29 +463,25 @@ func (p *Player) playCurrent() {
 	p.gen++
 	gen := p.gen
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(p.ctx)
 	p.cancelLoad = cancel
-	p.mu.Unlock()
-	p.changed()
 
-	resolver := p.Resolve
-	if resolver == nil {
-		resolver = ytmusic.DefaultClient.ResolveStream
-	}
-
-	// Load stream on goroutine
-	go func() {
+	// Load the stream asynchronously.
+	p.loadWG.Go(func() {
 		info, err := resolver(ctx, track.ID)
 		if err != nil {
 			p.post(func() {
 				p.mu.Lock()
-				defer p.mu.Unlock()
 				if gen != p.gen {
+					p.mu.Unlock()
 					return
 				}
 				p.loading = false
 				p.playing = false
 				p.pendingPlay = false
+				p.resumeAt = p.pauseOffset
+				p.resumeID = track.ID
+				p.mu.Unlock()
 				p.changed()
 			})
 			return
@@ -375,6 +493,12 @@ func (p *Player) playCurrent() {
 			p.mu.Lock()
 			if track.DurationMs <= 0 {
 				track.DurationMs = info.DurationMs
+				if p.at >= 0 && p.at < len(p.order) {
+					idx := p.order[p.at]
+					if idx >= 0 && idx < len(p.queue) && p.queue[idx].ID == track.ID && p.queue[idx].DurationMs <= 0 {
+						p.queue[idx].DurationMs = info.DurationMs
+					}
+				}
 				resolved = info.DurationMs
 			}
 			p.mu.Unlock()
@@ -404,13 +528,16 @@ func (p *Player) playCurrent() {
 		if err != nil {
 			p.post(func() {
 				p.mu.Lock()
-				defer p.mu.Unlock()
 				if gen != p.gen {
+					p.mu.Unlock()
 					return
 				}
 				p.loading = false
 				p.playing = false
 				p.pendingPlay = false
+				p.resumeAt = p.pauseOffset
+				p.resumeID = track.ID
+				p.mu.Unlock()
 				p.changed()
 			})
 			return
@@ -460,7 +587,9 @@ func (p *Player) playCurrent() {
 			// Check if approaching queue end to ask radio
 			p.checkRadioFeed()
 		})
-	}()
+	})
+	p.mu.Unlock()
+	p.changed()
 }
 
 func (p *Player) checkRadioFeed() {
@@ -477,9 +606,9 @@ func (p *Player) checkRadioFeed() {
 	go feed(func(more []ytmusic.Track) {
 		p.post(func() {
 			p.mu.Lock()
-			defer p.mu.Unlock()
 			p.feeding = false
 			if p.radioGen != gen || len(more) == 0 {
+				p.mu.Unlock()
 				return
 			}
 			start := len(p.queue)
@@ -487,6 +616,7 @@ func (p *Player) checkRadioFeed() {
 			for i := range more {
 				p.order = append(p.order, start+i)
 			}
+			p.mu.Unlock()
 			p.changed()
 		})
 	})
@@ -548,10 +678,16 @@ func (p *Player) advanceAfterEnd() {
 		p.changed()
 		return
 	}
-	hasNext := p.repeat != RepeatOff || p.at+1 < len(p.order)
+	repeatOne := p.repeat == RepeatOne
+	hasNext := p.repeat == RepeatAll || p.at+1 < len(p.order)
 	p.playing = false
 	p.mu.Unlock()
 
+	if repeatOne {
+		p.Seek(0)
+		p.Play()
+		return
+	}
 	if hasNext {
 		p.Next()
 	} else {
@@ -565,6 +701,10 @@ func (p *Player) advanceAfterEnd() {
 func (p *Player) Play() {
 	p.mu.Lock()
 	if p.playing {
+		p.mu.Unlock()
+		return
+	}
+	if len(p.queue) == 0 || p.at < 0 {
 		p.mu.Unlock()
 		return
 	}
@@ -648,11 +788,6 @@ func (p *Player) Next() {
 	p.mu.Lock()
 	if len(p.queue) == 0 {
 		p.mu.Unlock()
-		return
-	}
-	if p.repeat == RepeatOne {
-		p.mu.Unlock()
-		p.playCurrent()
 		return
 	}
 	nextAt := p.at + 1
@@ -745,6 +880,10 @@ func (p *Player) Seek(pos time.Duration) {
 			frame := int64(pos.Seconds() * float64(sr))
 			_ = p.stream.SetPosition(frame)
 		}
+	} else if p.track != nil {
+		// Store the target until output installation or retry.
+		p.resumeAt = pos
+		p.resumeID = p.track.ID
 	}
 	p.mu.Unlock()
 	p.changed()
@@ -789,22 +928,27 @@ func (p *Player) Restore(s Session) {
 	p.shuffle = s.Shuffle
 	p.repeat = s.Repeat
 	p.volume = s.Volume
-	p.reorder()
+	p.radio = s.Radio
 	p.playing = false
 	p.loading = false
-	if s.At >= 0 && s.At < len(p.queue) {
-		for i, idx := range p.order {
-			if idx == s.At {
-				p.at = i
-				break
-			}
-		}
-		track := p.queue[s.At]
+
+	at := s.At
+	if at < 0 || at >= len(p.queue) {
+		at = -1
+	}
+	p.reorderLocked(at)
+	if at >= 0 {
+		track := p.queue[at]
 		p.track = &track
 		p.pauseOffset = s.Position
 		p.resumeAt = s.Position
 		p.resumeID = track.ID
 		p.playStart = time.Now()
+	} else {
+		p.track = nil
+		p.pauseOffset = 0
+		p.resumeAt = 0
+		p.resumeID = ""
 	}
 	p.fade.setGain(p.volume)
 	p.mu.Unlock()

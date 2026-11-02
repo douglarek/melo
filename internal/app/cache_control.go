@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"runtime/debug"
 	"time"
@@ -16,12 +17,17 @@ func cacheLimitBytes(mb int64) int64 {
 // maintenanceLoop persists playback position regularly and keeps the disk
 // cache within its configured limit even though downloads happen outside
 // Cache.Save.
-func (a *app) maintenanceLoop() {
+func (a *app) maintenanceLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		a.savePlayerSession()
-		a.maintainCache()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.savePlayerSession()
+			a.maintainCache()
+		}
 	}
 }
 

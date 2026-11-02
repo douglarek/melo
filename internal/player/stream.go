@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,7 +28,10 @@ type stream interface {
 }
 
 type hlsStream struct {
-	mu          sync.Mutex
+	// mu protects segment state, counters, and decoder metadata.
+	mu sync.Mutex
+	// decMu serializes decoder construction and use.
+	decMu       sync.Mutex
 	info        *ytmusic.StreamInfo
 	cache       *Cache
 	client      *http.Client
@@ -38,14 +43,17 @@ type hlsStream struct {
 	// Segments state
 	segments    []ytmusic.StreamSegment
 	segData     [][]byte
+	segErr      []error
 	downloading map[int]bool
 	cancel      context.CancelFunc
 	ctx         context.Context
+	closeOnce   sync.Once
 
 	// Audio decoder
+	cacheHit  bool
+	cacheData []byte
 	decReader *segmentReader
 	decoder   *aacpcm.Decoder
-	pcmBuffer []float32
 	spectrum  []float32
 }
 
@@ -70,45 +78,76 @@ func openHLSStream(ctx context.Context, info *ytmusic.StreamInfo, cache *Cache) 
 		totalFrames: totalFrames,
 		segments:    info.Segments,
 		segData:     make([][]byte, len(info.Segments)),
+		segErr:      make([]error, len(info.Segments)),
 		downloading: make(map[int]bool),
 		cancel:      cancel,
 		ctx:         streamCtx,
 		spectrum:    make([]float32, 16),
 	}
 
-	// Check disk cache first
+	// Cached audio is decoded from memory; seeking rebuilds the decoder and
+	// discards frames before the target.
 	if cache != nil {
-		if cachedAudio, _, ok := cache.Lookup(info.VideoID); ok && len(cachedAudio) > 0 {
-			dec, err := aacpcm.NewDecoder(bytes.NewReader(cachedAudio))
-			if err == nil {
+		if cachedAudio, cachedInfo, ok := cache.Lookup(info.VideoID); ok && len(cachedAudio) > 0 {
+			if dec, err := aacpcm.NewDecoder(bytes.NewReader(cachedAudio)); err == nil {
+				s.cacheHit = true
+				s.cacheData = cachedAudio
 				s.decoder = dec
+				s.setDecoderInfo(dec.Info(), cachedInfo)
 				return s, nil
 			}
 		}
 	}
 
+	if len(s.segments) == 0 {
+		cancel()
+		return nil, errors.New("hls stream has no segments")
+	}
+
 	// Prepare segment reader
 	s.decReader = &segmentReader{s: s}
-	// Pre-fetch first 2 segments synchronously to initialize decoder
-	if len(s.segments) > 0 {
-		_ = s.fetchSegment(0)
+	// Fetch the first segment before constructing the decoder; fetch the
+	// second concurrently.
+	if err := s.fetchSegment(0); err != nil {
+		cancel()
+		return nil, fmt.Errorf("hls first segment: %w", err)
 	}
 	if len(s.segments) > 1 {
-		go s.fetchSegment(1)
+		go func() {
+			_ = s.fetchSegment(1)
+		}()
 	}
 
 	dec, err := aacpcm.NewDecoder(s.decReader)
 	if err != nil {
-		// Fallback: dummy empty stream rather than crashing
-		s.decoder = nil
-	} else {
-		s.decoder = dec
+		cancel()
+		return nil, fmt.Errorf("hls decoder: %w", err)
 	}
+	s.decoder = dec
+	s.setDecoderInfo(dec.Info(), nil)
 
 	// Start background fetching of remaining segments
 	go s.prefetchAll()
 
 	return s, nil
+}
+
+// setDecoderInfo applies the format reported by the decoder during
+// construction.
+func (s *hlsStream) setDecoderInfo(info aacpcm.Info, cached *ytmusic.StreamInfo) {
+	if info.SampleRate > 0 {
+		s.sampleRate = info.SampleRate
+	}
+	if info.Channels > 0 {
+		s.channels = info.Channels
+	}
+	durationMs := s.info.DurationMs
+	if cached != nil && cached.DurationMs > 0 {
+		durationMs = cached.DurationMs
+	}
+	if durationMs > 0 {
+		s.totalFrames = durationMs * int64(s.sampleRate) / 1000
+	}
 }
 
 func (s *hlsStream) fetchSegment(idx int) error {
@@ -117,33 +156,38 @@ func (s *hlsStream) fetchSegment(idx int) error {
 		s.mu.Unlock()
 		return nil
 	}
+	if err := s.segErr[idx]; err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	s.downloading[idx] = true
 	segURI := s.segments[idx].URI
 	s.mu.Unlock()
 
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, segURI, nil)
 	if err != nil {
-		s.mu.Lock()
-		s.downloading[idx] = false
-		s.mu.Unlock()
+		s.failSegment(idx, err)
 		return err
 	}
 	req.Header.Set("User-Agent", "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.mu.Lock()
-		s.downloading[idx] = false
-		s.mu.Unlock()
+		s.failSegment(idx, err)
 		return err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		err := fmt.Errorf("segment %d HTTP %d: %s", idx, resp.StatusCode, string(body))
+		s.failSegment(idx, err)
+		return err
+	}
+
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		s.mu.Lock()
-		s.downloading[idx] = false
-		s.mu.Unlock()
+		s.failSegment(idx, err)
 		return err
 	}
 
@@ -152,10 +196,20 @@ func (s *hlsStream) fetchSegment(idx int) error {
 
 	s.mu.Lock()
 	s.segData[idx] = cleanData
+	s.segErr[idx] = nil
 	s.downloading[idx] = false
 	s.mu.Unlock()
 
 	return nil
+}
+
+func (s *hlsStream) failSegment(idx int, err error) {
+	s.mu.Lock()
+	s.downloading[idx] = false
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		s.segErr[idx] = err
+	}
+	s.mu.Unlock()
 }
 
 func stripID3(data []byte) []byte {
@@ -175,50 +229,68 @@ func (s *hlsStream) prefetchAll() {
 		case <-s.ctx.Done():
 			return
 		default:
-			_ = s.fetchSegment(i)
+			if err := s.fetchSegment(i); err != nil {
+				return
+			}
 		}
 	}
 
-	// When all segments are downloaded, save to disk cache
+	// Save a complete segment set to the disk cache.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	allDownloaded := true
-	var fullAudio []byte
-	for _, seg := range s.segData {
+	segData := make([][]byte, len(s.segData))
+	copy(segData, s.segData)
+	for _, seg := range segData {
 		if seg == nil {
 			allDownloaded = false
 			break
 		}
+	}
+	s.mu.Unlock()
+
+	if !allDownloaded || s.cache == nil {
+		return
+	}
+
+	var fullAudio []byte
+	for _, seg := range segData {
 		fullAudio = append(fullAudio, seg...)
 	}
-	if allDownloaded && s.cache != nil && len(fullAudio) > 0 {
+	if len(fullAudio) > 0 {
 		s.cache.Save(s.info.VideoID, s.info, fullAudio)
 	}
 }
 
 func (s *hlsStream) SampleRate() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.sampleRate
 }
 
 func (s *hlsStream) Channels() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.channels
 }
 
 func (s *hlsStream) Len() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.totalFrames
 }
 
 func (s *hlsStream) Read(buf []float32) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.decoder == nil {
+	s.decMu.Lock()
+	dec := s.decoder
+	if dec == nil {
+		s.decMu.Unlock()
 		return 0, io.EOF
 	}
 
 	neededBytes := len(buf) * 2 // 16-bit PCM = 2 bytes per sample
 	pcmRaw := make([]byte, neededBytes)
-	nBytes, err := s.decoder.Read(pcmRaw)
+	nBytes, err := dec.Read(pcmRaw)
+	s.decMu.Unlock()
 	if nBytes <= 0 && err != nil {
 		return 0, err
 	}
@@ -230,20 +302,21 @@ func (s *hlsStream) Read(buf []float32) (int, error) {
 		buf[i] = f
 	}
 
-	// Update spectrum measurement
-	s.updateSpectrum(buf[:samplesRead])
-	s.curFrame += int64(samplesRead / s.channels)
+	s.mu.Lock()
+	s.updateSpectrumLocked(buf[:samplesRead])
+	s.curFrame += int64(samplesRead) / int64(max(1, s.channels))
+	s.mu.Unlock()
 
 	return samplesRead, err
 }
 
-func (s *hlsStream) updateSpectrum(samples []float32) {
+func (s *hlsStream) updateSpectrumLocked(samples []float32) {
 	if len(samples) == 0 {
 		return
 	}
 	bands := len(s.spectrum)
 	chunkSize := max(1, len(samples)/bands)
-	for b := 0; b < bands; b++ {
+	for b := range bands {
 		var sum float64
 		start := b * chunkSize
 		end := min(len(samples), start+chunkSize)
@@ -265,13 +338,66 @@ func (s *hlsStream) Spectrum() []float32 {
 }
 
 func (s *hlsStream) SetPosition(frame int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.decMu.Lock()
+	defer s.decMu.Unlock()
 
-	targetMs := frame * 1000 / int64(s.sampleRate)
+	s.mu.Lock()
+	sr := s.sampleRate
+	channels := s.channels
+	total := s.totalFrames
+	cacheHit := s.cacheHit
+	cacheData := s.cacheData
+	segments := slices.Clone(s.segments)
+	s.mu.Unlock()
+
+	if frame < 0 {
+		frame = 0
+	}
+	if total > 0 && frame > total {
+		frame = total
+	}
+
+	if cacheHit {
+		return s.seekCached(frame, cacheData, channels)
+	}
+	return s.seekSegments(frame, sr, segments)
+}
+
+// seekCached rebuilds a decoder over the cached audio and discards decoded
+// frames before the target. The caller holds decMu.
+func (s *hlsStream) seekCached(frame int64, data []byte, channels int) error {
+	dec, err := aacpcm.NewDecoder(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	skipBytes := frame * int64(max(1, channels)) * 2
+	if skipBytes > 0 {
+		if _, err := io.CopyN(io.Discard, dec, skipBytes); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+	}
+	s.decoder = dec
+	s.decReader = nil
+	s.mu.Lock()
+	s.curFrame = frame
+	s.mu.Unlock()
+	return nil
+}
+
+// seekSegments restarts the decoder at a segment boundary. The caller holds
+// decMu.
+func (s *hlsStream) seekSegments(frame int64, sampleRate int, segments []ytmusic.StreamSegment) error {
+	if len(segments) == 0 {
+		return errors.New("hls stream has no segments")
+	}
+	if sampleRate <= 0 {
+		sampleRate = 44100
+	}
+
+	targetMs := frame * 1000 / int64(sampleRate)
+	targetSeg := len(segments) - 1
 	var accumulatedMs int64
-	targetSeg := 0
-	for i, seg := range s.segments {
+	for i, seg := range segments {
 		if accumulatedMs+seg.DurationMs > targetMs {
 			targetSeg = i
 			break
@@ -279,21 +405,21 @@ func (s *hlsStream) SetPosition(frame int64) error {
 		accumulatedMs += seg.DurationMs
 	}
 
-	// Seek segment reader to targetSeg
-	s.decReader.segIdx = targetSeg
-	s.decReader.offset = 0
-
-	dec, err := aacpcm.NewDecoder(s.decReader)
+	sr := &segmentReader{s: s, segIdx: targetSeg}
+	dec, err := aacpcm.NewDecoder(sr)
 	if err != nil {
 		return err
 	}
+	s.decReader = sr
 	s.decoder = dec
+	s.mu.Lock()
 	s.curFrame = frame
+	s.mu.Unlock()
 	return nil
 }
 
 func (s *hlsStream) Close() error {
-	s.cancel()
+	s.closeOnce.Do(s.cancel)
 	return nil
 }
 
@@ -306,25 +432,46 @@ type segmentReader struct {
 
 func (sr *segmentReader) Read(p []byte) (int, error) {
 	for {
+		if err := sr.s.ctx.Err(); err != nil {
+			return 0, err
+		}
+
 		sr.s.mu.Lock()
 		if sr.segIdx >= len(sr.s.segments) {
 			sr.s.mu.Unlock()
 			return 0, io.EOF
 		}
 		data := sr.s.segData[sr.segIdx]
+		segErr := sr.s.segErr[sr.segIdx]
 		sr.s.mu.Unlock()
 
+		if segErr != nil {
+			return 0, segErr
+		}
+
 		if data == nil {
-			// Fetch on demand
+			// Wait for an in-flight fetch of this segment.
 			if err := sr.s.fetchSegment(sr.segIdx); err != nil {
 				return 0, err
 			}
 			sr.s.mu.Lock()
 			data = sr.s.segData[sr.segIdx]
+			segErr = sr.s.segErr[sr.segIdx]
 			sr.s.mu.Unlock()
+			if segErr != nil {
+				return 0, segErr
+			}
+			if data == nil {
+				select {
+				case <-sr.s.ctx.Done():
+					return 0, sr.s.ctx.Err()
+				case <-time.After(5 * time.Millisecond):
+					continue
+				}
+			}
 		}
 
-		if data != nil && sr.offset < len(data) {
+		if sr.offset < len(data) {
 			n := copy(p, data[sr.offset:])
 			sr.offset += n
 			return n, nil
@@ -477,6 +624,7 @@ type download struct {
 	path   string
 	part   string
 	n      int64
+	total  int64
 	done   bool
 	err    error
 	cancel context.CancelFunc
@@ -494,6 +642,7 @@ func startDownload(ctx context.Context, u string, destPath string, contentLength
 		file:   f,
 		path:   destPath,
 		part:   partPath,
+		total:  contentLength,
 		cancel: cancel,
 	}
 	d.cond.L = &d.mu
@@ -643,6 +792,10 @@ func (r *downloadReader) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		newPos = r.pos + offset
 	case io.SeekEnd:
+		if d.total > 0 {
+			newPos = d.total + offset
+			break
+		}
 		for !d.done {
 			d.cond.Wait()
 		}

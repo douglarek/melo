@@ -3,6 +3,7 @@ package ytmusic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -855,7 +856,13 @@ func parseAlbumResponse(data []byte, albumID string) (*Album, error) {
 	}
 
 	contents, _ := root["contents"].(map[string]any)
+	if contents == nil {
+		return nil, fmt.Errorf("album %s unavailable", albumID)
+	}
 	tc, _ := contents["twoColumnBrowseResultsRenderer"].(map[string]any)
+	if tc == nil {
+		return nil, fmt.Errorf("album %s unavailable", albumID)
+	}
 	if tc != nil {
 		tabs, _ := tc["tabs"].([]any)
 		if len(tabs) > 0 {
@@ -887,7 +894,9 @@ func parseAlbumResponse(data []byte, albumID string) (*Album, error) {
 		}
 	}
 
-	secList, _ := tc["secondaryContents"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
+	secondaryContents, _ := tc["secondaryContents"].(map[string]any)
+	sectionList, _ := secondaryContents["sectionListRenderer"].(map[string]any)
+	secList, _ := sectionList["contents"].([]any)
 	for _, s := range secList {
 		shelf, _ := s.(map[string]any)["musicShelfRenderer"].(map[string]any)
 		if shelf == nil {
@@ -913,6 +922,10 @@ func parseAlbumResponse(data []byte, albumID string) (*Album, error) {
 				}
 			}
 		}
+	}
+
+	if al.Title == "" && len(al.Tracks) == 0 {
+		return nil, fmt.Errorf("album %s unavailable", albumID)
 	}
 
 	return al, nil
