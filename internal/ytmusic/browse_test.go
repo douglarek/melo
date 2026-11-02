@@ -145,6 +145,102 @@ func TestParseSectionsKeepsMoodsAndGenres(t *testing.T) {
 	}
 }
 
+func TestParseSectionsKeepsGridShelves(t *testing.T) {
+	raw := []byte(`{
+		"contents": {
+			"singleColumnBrowseResultsRenderer": {
+				"tabs": [{
+					"tabRenderer": {
+						"content": {
+							"sectionListRenderer": {
+								"contents": [{
+									"gridRenderer": {
+										"header": {
+											"gridHeaderRenderer": {
+												"title": {"runs": [{"text": "精选播放列表"}]}
+											}
+										},
+										"items": [{
+											"musicTwoRowItemRenderer": {
+												"title": {"runs": [{"text": "1980年代西洋金曲精选"}]},
+												"subtitle": {"runs": [{"text": "Michael Jackson"}]},
+												"navigationEndpoint": {
+													"browseEndpoint": {
+														"browseId": "VLRDCLAK5uy_lMzHW51iFg1Kx0d_2EHpzbOgCrwtu8cgI",
+														"browseEndpointContextSupportedConfigs": {
+															"browseEndpointContextMusicConfig": {
+																"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+															}
+														}
+													}
+												}
+											}
+										}]
+									}
+								}]
+							}
+						}
+					}
+				}]
+			}
+		}
+	}`)
+
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	sections := parseSections(root)
+	if len(sections) != 1 {
+		t.Fatalf("sections = %d, want 1", len(sections))
+	}
+	sec := sections[0]
+	if sec.Title != "精选播放列表" || len(sec.Items) != 1 {
+		t.Fatalf("section = %+v", sec)
+	}
+	item := sec.Items[0]
+	if item.Type != "playlist" || item.Title != "1980年代西洋金曲精选" {
+		t.Fatalf("grid item = %+v", item)
+	}
+}
+
+func TestParseSectionsHandlesGridWithoutHeader(t *testing.T) {
+	root := map[string]any{
+		"contents": map[string]any{
+			"singleColumnBrowseResultsRenderer": map[string]any{
+				"tabs": []any{map[string]any{
+					"tabRenderer": map[string]any{
+						"content": map[string]any{
+							"sectionListRenderer": map[string]any{
+								"contents": []any{map[string]any{
+									"gridRenderer": map[string]any{
+										"items": []any{map[string]any{
+											"musicTwoRowItemRenderer": map[string]any{
+												"title": map[string]any{"runs": []any{map[string]any{"text": "无标题网格"}}},
+												"navigationEndpoint": map[string]any{
+													"browseEndpoint": map[string]any{"browseId": "VL123"},
+												},
+											},
+										}},
+									},
+								}},
+							},
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	sections := parseSections(root)
+	if len(sections) != 1 {
+		t.Fatalf("sections = %d, want 1", len(sections))
+	}
+	if sections[0].Title != "" || len(sections[0].Items) != 1 || sections[0].Items[0].Title != "无标题网格" {
+		t.Fatalf("section = %+v", sections[0])
+	}
+}
+
 func TestContinuationItemsReadsAppendAction(t *testing.T) {
 	root := map[string]any{
 		"onResponseReceivedActions": []any{

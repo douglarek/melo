@@ -191,6 +191,21 @@ func parseSections(root map[string]any) []Section {
 		}
 		car, ok := sm["musicCarouselShelfRenderer"].(map[string]any)
 		if !ok {
+			// Music grids (for example an era's "1980s" page) hold their
+			// playlists in a gridRenderer instead of carousel shelves.
+			if grid, ok := sm["gridRenderer"].(map[string]any); ok {
+				var header map[string]any
+				if h, ok := grid["header"].(map[string]any); ok {
+					header, _ = h["gridHeaderRenderer"].(map[string]any)
+				}
+				title := RunsToString(header["title"])
+				gridItems, _ := grid["items"].([]any)
+				items := parseCarouselContents(gridItems)
+				if len(items) > 0 {
+					sections = append(sections, Section{Title: title, Items: items})
+				}
+				continue
+			}
 			// Might be musicShelfRenderer
 			if shelf, ok := sm["musicShelfRenderer"].(map[string]any); ok {
 				title := RunsToString(shelf["title"])

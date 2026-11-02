@@ -199,6 +199,14 @@ func TestExploreMoodCategory(t *testing.T) {
 	a.categories[categoryKey(categoryID, categoryParams)] = &ytmusic.Category{
 		ID:    categoryID,
 		Title: "华语/粤语流行音乐",
+		Sections: []ytmusic.Section{{
+			Title: "精选播放列表",
+			Items: []ytmusic.CardItem{{
+				ID:    "VLRDCLAK5uy_lMzHW51iFg1Kx0d_2EHpzbOgCrwtu8cgI",
+				Title: "1980年代西洋金曲精选",
+				Type:  "playlist",
+			}},
+		}},
 	}
 
 	tt := ui.NewTester(a.view, 1200, 800)
@@ -226,6 +234,9 @@ func TestExploreMoodCategory(t *testing.T) {
 	}
 	if !tt.HasText("正在加载分类...") && !tt.HasText("华语/粤语流行音乐") {
 		t.Fatal("category page did not render")
+	}
+	if !tt.HasText("精选播放列表") || !tt.HasText("1980年代西洋金曲精选") {
+		t.Fatal("category sections did not render")
 	}
 }
 
