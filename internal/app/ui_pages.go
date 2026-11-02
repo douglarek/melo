@@ -59,8 +59,13 @@ func (a *app) viewCategory(c *ui.Context) {
 
 	ui.Column(c).FillWidth().Gap(28).Children(func() {
 		ui.Text(c, cat.Title).FontSize(28).Bold().TextColor(p.text)
+		// Only near-viewport sections fetch artwork. A podcast page can hold
+		// sixteen shelves, and loading every cover at once overwhelms the
+		// art cache and redraws the window for each image.
+		const sectionStride = 300
+		first := max(0, int(a.contentScroll.Y/sectionStride)-1)
 		for i, sec := range cat.Sections {
-			a.renderSection(c, fmt.Sprintf("cat-%s-sec-%d", categoryKey(a.route.id, a.route.params), i), sec)
+			a.renderSectionWithArt(c, fmt.Sprintf("cat-%s-sec-%d", categoryKey(a.route.id, a.route.params), i), sec, i >= first && i <= first+4)
 		}
 	})
 }
@@ -157,6 +162,10 @@ func (a *app) loadChartsCountry(c *ui.Context) {
 }
 
 func (a *app) renderSection(c *ui.Context, key string, sec ytmusic.Section) {
+	a.renderSectionWithArt(c, key, sec, true)
+}
+
+func (a *app) renderSectionWithArt(c *ui.Context, key string, sec ytmusic.Section, loadArt bool) {
 	ui.Column(c.Key(key)).FillWidth().Gap(14).Children(func() {
 		if sec.Layout == "moods" {
 			a.renderMoodSection(c, key, sec)
@@ -195,8 +204,13 @@ func (a *app) renderSection(c *ui.Context, key string, sec ytmusic.Section) {
 		}
 		ui.ScrollHorizontal(c).TrackScroll(state).FillWidth().Children(func() {
 			ui.Row(c).Gap(16).Padding(0, 0, 10, 0).AlignItems(ui.Start).Children(func() {
+				// Load covers for the visible cards and a small buffer. Loading
+				// every cover in a long shelf floods the art cache and forces a
+				// full redraw for each image.
+				first := max(0, int(state.X/(150+16))-1)
+				last := first + 8
 				for j, item := range items {
-					a.renderCard(c.Key(fmt.Sprintf("card-%d", j)), item)
+					a.renderCardWithArt(c.Key(fmt.Sprintf("card-%d", j)), item, loadArt && j >= first && j <= last)
 				}
 			})
 		})
@@ -237,7 +251,7 @@ func (a *app) openShortcut(item ytmusic.CardItem) {
 func (a *app) viewLibrary(c *ui.Context) {
 	p := a.pal
 	if a.libraryFilter == "" {
-		a.libraryFilter = "playlists"
+		a.libraryFilter = "all"
 	}
 
 	ui.Column(c).FillWidth().Gap(24).Children(func() {
@@ -255,8 +269,8 @@ func (a *app) viewLibrary(c *ui.Context) {
 		switch a.libraryFilter {
 		case "songs":
 			a.librarySongs(c)
-		case "playlists":
-			a.libraryPlaylistGrid(c)
+		case "all", "playlists", "albums", "artists", "profile", "podcasts":
+			a.libraryGrid(c)
 		default:
 			a.libraryEmpty(c, "暂无内容")
 		}
@@ -280,6 +294,7 @@ func (a *app) libraryFilters(c *ui.Context) {
 		key   string
 		label string
 	}{
+		{"all", "全部"},
 		{"playlists", "播放列表"},
 		{"songs", "歌曲"},
 		{"albums", "专辑"},
@@ -313,14 +328,87 @@ func (a *app) libraryFilters(c *ui.Context) {
 	})
 }
 
-func (a *app) libraryPlaylistGrid(c *ui.Context) {
-	items := make([]ytmusic.CardItem, 0, len(a.libraryPlaylists)+1)
-	items = append(items, ytmusic.CardItem{
-		ID:       "LM",
-		Title:    "赞过的音乐",
-		Subtitle: "自动播放列表",
-		Type:     "playlist",
+func (a *app) libraryGrid(c *ui.Context) {
+	items := a.libraryFilterItems()
+	if len(items) == 0 {
+		labels := map[string]string{
+			"playlists": "暂无播放列表",
+			"albums":    "暂无专辑",
+			"artists":   "暂无音乐人",
+			"profile":   "暂无个人资料",
+			"podcasts":  "暂无播客",
+		}
+		text := labels[a.libraryFilter]
+		if text == "" {
+			text = "暂无内容"
+		}
+		a.libraryEmpty(c, text)
+		return
+	}
+
+	ui.Row(c).FillWidth().Wrap().Gap(24).AlignItems(ui.Start).Children(func() {
+		for i, item := range items {
+			a.renderCard(c.Key(fmt.Sprintf("lib-card-%d", i)), item)
+		}
 	})
+}
+
+func (a *app) libraryFilterItems() []ytmusic.CardItem {
+	if a.libraryFilter == "profile" {
+		if a.profile == nil {
+			return nil
+		}
+		return []ytmusic.CardItem{{
+			ID:        "profile",
+			Title:     a.profile.Name,
+			Subtitle:  a.profile.Handle,
+			Thumbnail: a.profile.Avatar,
+			Type:      "profile",
+		}}
+	}
+
+	var items []ytmusic.CardItem
+	if a.libraryFilter == "all" || a.libraryFilter == "playlists" {
+		items = append(items, ytmusic.CardItem{
+			ID:       "LM",
+			Title:    "赞过的音乐",
+			Subtitle: "自动播放列表",
+			Type:     "playlist",
+		})
+	}
+
+	if len(a.libraryItems) > 0 {
+		for _, item := range a.libraryItems {
+			if isLikedPlaylistID(item.ID) {
+				continue
+			}
+			switch a.libraryFilter {
+			case "all":
+				items = append(items, item)
+			case "playlists":
+				if item.Type == "playlist" {
+					items = append(items, item)
+				}
+			case "albums":
+				if item.Type == "album" {
+					items = append(items, item)
+				}
+			case "artists":
+				if item.Type == "artist" {
+					items = append(items, item)
+				}
+			case "podcasts":
+				if item.Type == "podcast" {
+					items = append(items, item)
+				}
+			}
+		}
+		return items
+	}
+
+	if a.libraryFilter != "all" && a.libraryFilter != "playlists" {
+		return items
+	}
 	for _, pl := range a.libraryPlaylists {
 		subtitle := "播放列表"
 		if pl.Author != "" {
@@ -337,12 +425,7 @@ func (a *app) libraryPlaylistGrid(c *ui.Context) {
 			Type:      "playlist",
 		})
 	}
-
-	ui.Row(c).FillWidth().Wrap().Gap(24).AlignItems(ui.Start).Children(func() {
-		for i, item := range items {
-			a.renderCard(c.Key(fmt.Sprintf("lib-card-%d", i)), item)
-		}
-	})
+	return items
 }
 
 func (a *app) librarySongs(c *ui.Context) {
@@ -572,6 +655,10 @@ func (a *app) renderMoodGrid(c *ui.Context, items []ytmusic.CardItem, limit int)
 }
 
 func (a *app) renderCard(c *ui.Context, item ytmusic.CardItem) {
+	a.renderCardWithArt(c, item, true)
+}
+
+func (a *app) renderCardWithArt(c *ui.Context, item ytmusic.CardItem, loadArt bool) {
 	p := a.pal
 
 	card := ui.Column(c).Width(150).Gap(8).Cursor(ui.CursorPointer).ContextMenu(a.cardCopyMenu(c, item))
@@ -589,6 +676,10 @@ func (a *app) renderCard(c *ui.Context, item ytmusic.CardItem) {
 			a.open(route{page: pageAlbum, id: item.ID})
 		case "artist":
 			a.open(route{page: pageArtist, id: item.ID})
+		case "podcast":
+			a.open(route{page: pagePlaylist, id: item.ID})
+		case "profile":
+			a.settingsModalOpen = true
 		default:
 			if item.Track != nil {
 				a.pl.PlayTrack(*item.Track)
@@ -607,8 +698,10 @@ func (a *app) renderCard(c *ui.Context, item ytmusic.CardItem) {
 			liked.Children(func() {
 				ui.Icon(c, iconHeartFill).Size(48, 48).TextColor(ui.RGBA(1, 1, 1, 0.92))
 			})
-		} else {
+		} else if loadArt {
 			a.coverImage(c, item.Thumbnail, 150, 8)
+		} else {
+			a.coverImageCached(c, item.Thumbnail, 150, 8)
 		}
 
 		// Titles

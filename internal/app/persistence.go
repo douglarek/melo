@@ -14,6 +14,7 @@ import (
 
 type libraryCache struct {
 	Playlists []ytmusic.PlaylistItem `json:"playlists"`
+	Items     []ytmusic.CardItem     `json:"items,omitempty"`
 	Liked     *ytmusic.Playlist      `json:"liked,omitempty"`
 }
 
@@ -96,6 +97,7 @@ func (a *app) saveLibraryCache() {
 
 	cache := libraryCache{
 		Playlists: a.libraryPlaylists,
+		Items:     a.libraryItems,
 		Liked:     liked,
 	}
 	data, err := json.Marshal(cache)
@@ -124,6 +126,9 @@ func (a *app) restoreLibraryCache() {
 	}
 	if len(cache.Playlists) > 0 {
 		a.libraryPlaylists = cache.Playlists
+	}
+	if len(cache.Items) > 0 {
+		a.libraryItems = cache.Items
 	}
 	if cache.Liked != nil {
 		a.playlists["LM"] = cache.Liked

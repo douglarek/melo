@@ -68,6 +68,7 @@ type artCache struct {
 	post    func(func())
 	dir     string
 
+	postPending bool
 	artBytes    int64
 	mosaicBytes int64
 	mosaicLimit int64
@@ -159,12 +160,31 @@ func (c *artCache) get(u string, side int) *artwork {
 			go debug.FreeOSMemory()
 		}
 
-		c.post(func() {
-			// Window redraw is automatically scheduled by post
-		})
+		c.schedulePost()
 	}(u, side, key)
 
 	return nil
+}
+
+// schedulePost coalesces the redraws caused by many covers finishing at once.
+func (c *artCache) schedulePost() {
+	if c.post == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.postPending {
+		c.mu.Unlock()
+		return
+	}
+	c.postPending = true
+	c.mu.Unlock()
+
+	time.AfterFunc(80*time.Millisecond, func() {
+		c.mu.Lock()
+		c.postPending = false
+		c.mu.Unlock()
+		c.post(func() {})
+	})
 }
 
 func (c *artCache) setPinned(pins map[string]bool) {
@@ -304,6 +324,12 @@ func (c *artCache) colorFor(key string) (ui.Color, bool) {
 	defer c.mu.Unlock()
 	color, ok := c.colors[key]
 	return color, ok
+}
+
+func (c *artCache) cached(u string, side int) *artwork {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.art[artworkCacheKey(u, side)]
 }
 
 func artworkDiskPath(dir, key string) string {
@@ -555,6 +581,14 @@ func (a *app) coverBitmap(c *ui.Context, bmp *ui.Bitmap, size, radius float32) {
 
 // coverImage renders an artwork image or a graceful placeholder if still loading.
 func (a *app) coverImage(c *ui.Context, u string, size float32, radius float32) {
+	a.coverImageWith(c, u, size, radius, true)
+}
+
+func (a *app) coverImageCached(c *ui.Context, u string, size float32, radius float32) {
+	a.coverImageWith(c, u, size, radius, false)
+}
+
+func (a *app) coverImageWith(c *ui.Context, u string, size float32, radius float32, load bool) {
 	p := a.pal
 
 	box := ui.Box(c).Size(size, size).Radius(radius).Background(p.card).AlignItems(ui.Center).Justify(ui.Center)
@@ -578,7 +612,12 @@ func (a *app) coverImage(c *ui.Context, u string, size float32, radius float32) 
 		}
 	}
 
-	art := a.art.get(u, side)
+	var art *artwork
+	if load {
+		art = a.art.get(u, side)
+	} else {
+		art = a.art.cached(u, side)
+	}
 	if art != nil && art.bmp != nil {
 		box.Children(func() {
 			ui.Image(c, art.bmp).Fill().Fit(ui.Cover).Radius(radius)

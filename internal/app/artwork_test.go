@@ -6,9 +6,32 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestArtCacheCoalescesPosts(t *testing.T) {
+	var posts atomic.Int32
+	c := newArtCache(func(func()) { posts.Add(1) }, "")
+
+	for i := 0; i < 5; i++ {
+		c.schedulePost()
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for posts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := posts.Load(); got != 1 {
+		t.Fatalf("posts = %d, want 1", got)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if got := posts.Load(); got != 1 {
+		t.Fatalf("posts after delay = %d, want 1", got)
+	}
+}
 
 func TestFitArtworkDownscalesLargeCovers(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 500))

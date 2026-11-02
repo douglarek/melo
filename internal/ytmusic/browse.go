@@ -71,8 +71,10 @@ func (c *Client) BrowseCategory(ctx context.Context, browseID, params string) (*
 	}
 
 	cat := &Category{ID: browseID}
-	if header, ok := root["header"].(map[string]any)["musicHeaderRenderer"].(map[string]any); ok {
-		cat.Title = RunsToString(header["title"])
+	if header, ok := root["header"].(map[string]any); ok {
+		if musicHeader, ok := header["musicHeaderRenderer"].(map[string]any); ok {
+			cat.Title = RunsToString(musicHeader["title"])
+		}
 	}
 	cat.Sections = parseSections(root)
 	return cat, nil
@@ -1322,6 +1324,51 @@ func (c *Client) BrowseLibraryPlaylists(ctx context.Context) ([]PlaylistItem, er
 	}
 
 	return playlists, nil
+}
+
+// BrowseLibrary retrieves the mixed recent-activity grid from the library
+// landing page. It includes playlists, artists, albums, and podcasts.
+func (c *Client) BrowseLibrary(ctx context.Context) ([]CardItem, error) {
+	data, err := c.post(ctx, "browse", map[string]any{"browseId": "FEmusic_library_landing"}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+	contents, _ := root["contents"].(map[string]any)
+	sc, _ := contents["singleColumnBrowseResultsRenderer"].(map[string]any)
+	tabs, _ := sc["tabs"].([]any)
+	if len(tabs) == 0 {
+		return nil, nil
+	}
+	tab0, _ := tabs[0].(map[string]any)
+	tr, _ := tab0["tabRenderer"].(map[string]any)
+	content, _ := tr["content"].(map[string]any)
+	sl, _ := content["sectionListRenderer"].(map[string]any)
+	secList, _ := sl["contents"].([]any)
+
+	var cards []CardItem
+	seen := map[string]bool{}
+	for _, raw := range findGridItems(secList) {
+		item, _ := raw.(map[string]any)
+		twoRow, ok := item["musicTwoRowItemRenderer"].(map[string]any)
+		if !ok {
+			continue
+		}
+		card := parseTwoRowItem(twoRow)
+		if card.ID == "" || card.Title == "" || seen[card.ID] {
+			continue
+		}
+		if strings.HasPrefix(card.ID, "MPSPPL") || strings.HasPrefix(card.Subtitle, "播客") {
+			card.Type = "podcast"
+		}
+		seen[card.ID] = true
+		cards = append(cards, card)
+	}
+	return cards, nil
 }
 
 // BrowseLikedSongs retrieves the authenticated user's Liked Music playlist.

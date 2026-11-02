@@ -105,6 +105,58 @@ func TestLibraryPageRendersPlaylists(t *testing.T) {
 	}
 }
 
+func TestLibraryFiltersUseLandingItems(t *testing.T) {
+	a := newTestApp(t)
+	a.route = route{page: pageLibrary}
+	a.profile = &ytmusic.Profile{Name: "测试用户", Handle: "@testuser"}
+	a.libraryItems = []ytmusic.CardItem{
+		{ID: "VLLM", Title: "赞过的音乐", Subtitle: "自动播放列表", Type: "playlist"},
+		{ID: "UCtestartist", Title: "测试音乐人", Subtitle: "100位订阅者", Type: "artist"},
+		{ID: "MPSPPLtestpodcast", Title: "测试播客", Subtitle: "测试主播", Type: "podcast"},
+		{ID: "VLPLtestplaylist", Title: "测试歌单", Subtitle: "10 首曲目", Type: "playlist"},
+	}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	for _, text := range []string{"全部", "测试音乐人", "测试播客", "测试歌单"} {
+		if !tt.HasText(text) {
+			t.Fatalf("library all filter missing %q", text)
+		}
+	}
+
+	if err := tt.Click("音乐人"); err != nil {
+		t.Fatalf("click 音乐人 filter: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("测试音乐人") || tt.HasText("测试播客") {
+		t.Fatalf("artists filter did not isolate artist items")
+	}
+
+	if err := tt.Click("播客"); err != nil {
+		t.Fatalf("click 播客 filter: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("测试播客") || tt.HasText("测试音乐人") {
+		t.Fatalf("podcasts filter did not isolate podcast items")
+	}
+
+	if err := tt.Click("个人资料"); err != nil {
+		t.Fatalf("click 个人资料 filter: %v", err)
+	}
+	tt.Frame()
+	if a.libraryFilter != "profile" || tt.HasText("暂无个人资料") {
+		t.Fatalf("profile filter = %q", a.libraryFilter)
+	}
+
+	if err := tt.Click("专辑"); err != nil {
+		t.Fatalf("click 专辑 filter: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("暂无专辑") {
+		t.Fatal("albums filter should show an empty state")
+	}
+}
+
 func TestCategoryMoodButtonsOpenSubcategory(t *testing.T) {
 	a := newTestApp(t)
 	const rootID = "FEmusic_moods_and_genres"

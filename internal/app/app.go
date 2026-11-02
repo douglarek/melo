@@ -106,6 +106,7 @@ type app struct {
 	quitting      bool
 
 	libraryPlaylists []ytmusic.PlaylistItem
+	libraryItems     []ytmusic.CardItem
 	libraryLoading   bool
 	libraryFilter    string
 
@@ -312,6 +313,7 @@ func (a *app) loadLibrary() {
 		defer cancel()
 
 		playlists, _ := ytmusic.DefaultClient.BrowseLibraryPlaylists(ctx)
+		items, _ := ytmusic.DefaultClient.BrowseLibrary(ctx)
 		liked, _ := ytmusic.DefaultClient.BrowseLikedSongs(ctx)
 
 		a.post(func() {
@@ -319,6 +321,10 @@ func (a *app) loadLibrary() {
 			updated := false
 			if len(playlists) > 0 {
 				a.libraryPlaylists = playlists
+				updated = true
+			}
+			if len(items) > 0 {
+				a.libraryItems = items
 				updated = true
 			}
 			if liked != nil {
