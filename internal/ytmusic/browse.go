@@ -347,7 +347,7 @@ func parseTwoRowItem(t map[string]any) CardItem {
 			Thumbnail:  thumbURL,
 			Thumbnails: thumbs,
 			Artists:    []ArtistRef{{Name: subtitle}},
-			Video:      hasMusicVideo(nav),
+			Video:      itemHasMusicVideo(t),
 		}
 	}
 
@@ -410,9 +410,7 @@ func parseResponsiveAsCard(r map[string]any) CardItem {
 	}
 
 	var browseID, pageType string
-	var watchNav map[string]any
 	if nav, ok := r["navigationEndpoint"].(map[string]any); ok && nav != nil {
-		watchNav = nav
 		if be, ok := nav["browseEndpoint"].(map[string]any); ok && be != nil {
 			browseID, _ = be["browseId"].(string)
 			if supported, ok := be["browseEndpointContextSupportedConfigs"].(map[string]any); ok {
@@ -428,9 +426,6 @@ func parseResponsiveAsCard(r map[string]any) CardItem {
 		if runs, ok := col0Flex["text"].(map[string]any)["runs"].([]any); ok && len(runs) > 0 {
 			if run0, ok := runs[0].(map[string]any); ok {
 				nav, _ := run0["navigationEndpoint"].(map[string]any)
-				if nav != nil {
-					watchNav = nav
-				}
 				be, _ := nav["browseEndpoint"].(map[string]any)
 				if be != nil {
 					browseID, _ = be["browseId"].(string)
@@ -467,7 +462,7 @@ func parseResponsiveAsCard(r map[string]any) CardItem {
 			Thumbnail:  thumbURL,
 			Thumbnails: thumbs,
 			Artists:    artists,
-			Video:      hasMusicVideo(watchNav),
+			Video:      itemHasMusicVideo(r),
 		}
 	}
 
@@ -833,7 +828,6 @@ func parseTrackFromListItem(r map[string]any) Track {
 	}
 
 	thumbs := extractThumbnail(r)
-	nav, _ := r["navigationEndpoint"].(map[string]any)
 
 	return Track{
 		ID:         videoID,
@@ -843,7 +837,7 @@ func parseTrackFromListItem(r map[string]any) Track {
 		DurationMs: durationMs,
 		Thumbnail:  BestThumbnail(thumbs),
 		Thumbnails: thumbs,
-		Video:      hasMusicVideo(nav),
+		Video:      itemHasMusicVideo(r),
 	}
 }
 

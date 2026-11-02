@@ -155,7 +155,7 @@ func parseCardShelf(card map[string]any, res *SearchResult) {
 			Thumbnail:  thumbURL,
 			Thumbnails: thumbs,
 			Artists:    []ArtistRef{{Name: subtitle}},
-			Video:      hasMusicVideo(nav),
+			Video:      itemHasMusicVideo(card),
 		})
 	}
 }
@@ -262,18 +262,6 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 	case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL") || pageType == "MUSIC_PAGE_TYPE_PLAYLIST":
 		res.Playlists = append(res.Playlists, PlaylistItem{ID: browseID, Title: title, Author: subtitle, Thumbnail: thumbURL})
 	case videoID != "":
-		nav, _ := r["navigationEndpoint"].(map[string]any)
-		video := hasMusicVideo(nav)
-		if !video {
-			for _, raw := range col0Runs {
-				run, _ := raw.(map[string]any)
-				runNav, _ := run["navigationEndpoint"].(map[string]any)
-				if hasMusicVideo(runNav) {
-					video = true
-					break
-				}
-			}
-		}
 		res.Tracks = append(res.Tracks, Track{
 			ID:         videoID,
 			Title:      title,
@@ -281,7 +269,7 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 			DurationMs: durationMs,
 			Thumbnail:  thumbURL,
 			Thumbnails: thumbs,
-			Video:      video,
+			Video:      itemHasMusicVideo(r),
 		})
 	case strings.Contains(subtitle, "音乐人") || strings.Contains(subtitle, "Artist"):
 		res.Artists = append(res.Artists, ArtistRef{ID: browseID, Name: title, Thumbnail: thumbURL})
