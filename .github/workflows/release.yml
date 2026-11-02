@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: latest-release
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -162,13 +162,9 @@ jobs:
           } > /tmp/release-notes.md
 
           if gh release view latest >/dev/null 2>&1; then
-            gh release view latest --json assets --jq '.assets[].name' | while IFS= read -r asset; do
-              [ -n "$asset" ] && gh release delete-asset latest "$asset" --yes
-            done
-            gh release edit latest --title "Latest" --latest --notes-file /tmp/release-notes.md
-          else
-            gh release create latest --title "Latest" --latest --verify-tag --notes-file /tmp/release-notes.md
+            gh release delete latest --yes
           fi
+          gh release create latest --title "Latest (${VERSION})" --latest --verify-tag --notes-file /tmp/release-notes.md
 
           find dist -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' \) -print0 \
             | xargs -0 -r gh release upload latest --clobber
