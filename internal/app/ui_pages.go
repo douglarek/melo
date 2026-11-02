@@ -1098,14 +1098,14 @@ func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur
 }
 
 func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color) ui.Element {
-	return ui.RichText(c).TextColor(color).FontSize(12).Children(func() {
+	return ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
 		if len(t.Artists) == 0 {
-			ui.Text(c, "未知音乐人")
+			ui.Text(c, "未知音乐人").FontSize(12).TextColor(color)
 			return
 		}
 		for i, ar := range t.Artists {
 			if i > 0 {
-				ui.Text(c, ", ")
+				ui.Text(c, ", ").FontSize(12).TextColor(color)
 			}
 			artist := ar
 			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
@@ -1118,11 +1118,19 @@ func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color)
 }
 
 func (a *app) link(c *ui.Context, text string, color, hover ui.Color, r route) {
-	link := ui.Link(c, text, "").TextColor(color)
-	if link.Hovered() {
-		link.TextColor(hover).Underline()
+	row := ui.Row(c).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+	var label ui.Element
+	row.Children(func() {
+		label = ui.Text(c, text).FontSize(12).TextColor(color)
+	})
+	if row.Hovered() {
+		label.TextColor(hover).Underline()
 	}
-	link.OnClick(func() { a.open(r) })
+	if row.Clicked() {
+		a.nowPlayingOpen = false
+		a.closeVideo()
+		a.open(r)
+	}
 }
 
 func albumCardType(typ string) string {

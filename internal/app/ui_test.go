@@ -1142,6 +1142,29 @@ func TestSearchPodcastEpisodesUseTrackList(t *testing.T) {
 	}
 }
 
+func TestNowPlayingArtistLinkOpensArtist(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{
+		ID:      "track1",
+		Title:   "尘缘",
+		Artists: []ytmusic.ArtistRef{{ID: "UCartist", Name: "罗文"}},
+	}}, 0)
+	a.nowPlayingOpen = true
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	// The player bar behind the overlay also shows the artist, so target the
+	// visible artist in the now-playing panel.
+	tt.ClickAt(195, 624)
+	tt.Frame()
+	if a.nowPlayingOpen {
+		t.Fatal("artist link should close the now playing overlay")
+	}
+	if a.route.page != pageArtist || a.route.id != "UCartist" {
+		t.Fatalf("route = %+v, want artist UCartist", a.route)
+	}
+}
+
 func TestVideoTrackDefaultsToAudio(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{{
