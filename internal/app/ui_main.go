@@ -137,11 +137,6 @@ func (a *app) sidebar(c *ui.Context) {
 			navItem("探索", iconExplore, pageExplore)
 			navItem("媒体库", iconLibrary, pageLibrary)
 
-			// Library section
-			ui.Box(c).Height(14)
-			ui.Text(c, "我的音乐库").FontSize(11.5).Bold().TextColor(p.faint).Margin(0, 12, 6, 12)
-			navItem("我喜欢的音乐", iconHeart, pageLiked)
-
 			// User's playlists
 			if len(a.libraryPlaylists) > 0 {
 				ui.Box(c).Height(10)

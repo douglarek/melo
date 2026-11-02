@@ -424,6 +424,9 @@ func (a *app) loadCurrentRoute() {
 		}
 	case pagePlaylist:
 		id := a.route.id
+		if isLikedPlaylistID(id) && a.profile == nil {
+			return
+		}
 		if a.playlists[id] == nil {
 			go func() {
 				pl, _ := ytmusic.DefaultClient.BrowsePlaylist(ctx, id)

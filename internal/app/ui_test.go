@@ -945,6 +945,7 @@ func TestLikedTracksBackfillDuration(t *testing.T) {
 
 func TestLikedPlaylistUnlikeRemovesTrack(t *testing.T) {
 	a := newTestApp(t)
+	a.profile = &ytmusic.Profile{Name: "测试用户"}
 	t1 := ytmusic.Track{ID: "liked1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
 	t2 := ytmusic.Track{ID: "liked2", Title: "七里香", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 299000}
 	a.liked = []ytmusic.Track{t1, t2}
@@ -1099,6 +1100,41 @@ func TestDoubleClickTopBarMaximize(t *testing.T) {
 	tt.ClickAt(300, 20)
 	tt.ClickAt(300, 20)
 	tt.Frame()
+}
+
+func TestLoggedOutLibraryShowsLikedCard(t *testing.T) {
+	a := newTestApp(t)
+	a.profile = nil
+	a.libraryItems = nil
+	a.libraryPlaylists = nil
+	a.route = route{page: pageLibrary}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if !tt.HasText("赞过的音乐") {
+		t.Fatal("logged-out library should still show the liked music card")
+	}
+	if err := tt.Click("赞过的音乐"); err != nil {
+		t.Fatalf("click liked card: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageLiked {
+		t.Fatalf("liked card opened %+v, want pageLiked", a.route)
+	}
+	if tt.HasText("正在加载歌单...") {
+		t.Fatal("logged-out liked page should not wait for a network playlist")
+	}
+}
+
+func TestSidebarHidesLikedShortcut(t *testing.T) {
+	a := newTestApp(t)
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	for _, text := range []string{"我的音乐库", "我喜欢的音乐"} {
+		if tt.HasText(text) {
+			t.Fatalf("sidebar still shows removed shortcut %q", text)
+		}
+	}
 }
 
 func TestSearchPodcastResults(t *testing.T) {

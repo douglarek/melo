@@ -659,7 +659,11 @@ func (a *app) renderCardWithArt(c *ui.Context, item ytmusic.CardItem, loadArt bo
 				a.pl.PlayTrack(ytmusic.Track{ID: item.ID, Title: item.Title})
 			}
 		case "playlist":
-			a.open(route{page: pagePlaylist, id: item.ID})
+			if isLikedPlaylistID(item.ID) {
+				a.open(route{page: pageLiked})
+			} else {
+				a.open(route{page: pagePlaylist, id: item.ID})
+			}
 		case "album":
 			a.open(route{page: pageAlbum, id: item.ID})
 		case "artist":
@@ -701,6 +705,10 @@ func (a *app) renderCardWithArt(c *ui.Context, item ytmusic.CardItem, loadArt bo
 }
 
 func (a *app) viewPlaylist(c *ui.Context) {
+	if isLikedPlaylistID(a.route.id) && a.profile == nil {
+		a.viewLiked(c)
+		return
+	}
 	p := a.pal
 	pl := a.playlists[a.route.id]
 	if pl == nil {
