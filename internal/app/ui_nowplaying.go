@@ -446,6 +446,9 @@ func (a *app) npInfo(c *ui.Context, cur *ytmusic.Track) {
 			a.npMoreButton(c, *cur)
 		})
 		a.npArtists(c, *cur)
+		if a.pl.StreamFallback() {
+			ui.Text(c, "音质已回退至 96 kbps").FontSize(11).TextColor(npWhite.Alpha(0.4))
+		}
 	})
 }
 

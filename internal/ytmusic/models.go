@@ -261,8 +261,10 @@ type StreamInfo struct {
 	ContentLength int64
 	// LocalPath is a downloaded file to play instead of a URL, and Sabr
 	// downloads it while it plays.
-	LocalPath   string
-	Sabr        *SabrSession
+	LocalPath string
+	Sabr      *SabrSession
+	// Fallback says the stream is a lower quality substitute for SABR.
+	Fallback    bool
 	HLSPlaylist string
 	Segments    []StreamSegment
 }

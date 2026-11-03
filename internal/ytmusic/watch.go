@@ -535,6 +535,7 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
 			if f := pickAndroidAudio(sd); f != nil {
 				if u, _ := f["url"].(string); u != "" {
+					itag, _ := f["itag"].(float64)
 					durMs := int64(0)
 					if dStr, ok := f["approxDurationMs"].(string); ok {
 						durMs, _ = strconv.ParseInt(dStr, 10, 64)
@@ -561,6 +562,7 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 						Channels:      channels,
 						DurationMs:    durMs,
 						ContentLength: contentLength,
+						Fallback:      int(itag) == 18,
 					}, nil
 				}
 			}

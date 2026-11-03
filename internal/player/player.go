@@ -59,12 +59,13 @@ type Player struct {
 	feeding  bool
 	radioGen int
 
-	track   *ytmusic.Track
-	out     *audio.Player
-	stream  stream
-	info    *ytmusic.StreamInfo
-	fade    fader
-	loading bool
+	track    *ytmusic.Track
+	out      *audio.Player
+	stream   stream
+	info     *ytmusic.StreamInfo
+	fallback bool
+	fade     fader
+	loading  bool
 
 	gen        int
 	cancelLoad context.CancelFunc
@@ -173,6 +174,14 @@ func (p *Player) Loading() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.loading
+}
+
+// StreamFallback reports whether the current stream is a lower quality
+// substitute for SABR.
+func (p *Player) StreamFallback() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.fallback
 }
 
 // Current returns a snapshot of the current track.
@@ -451,6 +460,7 @@ func (p *Player) playCurrent() {
 	}
 	p.resumeAt, p.resumeID = 0, ""
 	p.track = &track
+	p.fallback = false
 	p.loading = true
 	p.playing = false
 	p.pendingPlay = true
@@ -484,6 +494,12 @@ func (p *Player) playCurrent() {
 			})
 			return
 		}
+
+		p.mu.Lock()
+		if gen == p.gen {
+			p.fallback = info.Fallback
+		}
+		p.mu.Unlock()
 
 		// Keep the queue entry complete when the source track had no duration.
 		resolved := int64(0)
