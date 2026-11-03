@@ -524,14 +524,24 @@ func (c *Client) iosPlayer(ctx context.Context, videoID string) (map[string]any,
 	return c.player(ctx, iosPlayerPayload(videoID), "5", "21.26.4", iosUserAgent)
 }
 
+// ErrUnavailable says YouTube does not serve the track here, as when it is
+// region locked or removed.
+var ErrUnavailable = errors.New("track is not available")
+
 // ResolveStream resolves the sound to play: a SABR download (AAC 128 kbps)
 // when it is configured and works, else the ANDROID client's stream, which
 // is reliable and progressive when it has it, or else the HLS one iOS serves.
 func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo, error) {
+	sabrErr := error(nil)
 	if info, err := c.resolveSabrFile(ctx, videoID); err == nil {
 		return info, nil
+	} else {
+		sabrErr = err
 	}
 	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
+		if ps, _ := pResp["playabilityStatus"].(map[string]any); ps["status"] == "UNPLAYABLE" {
+			return nil, ErrUnavailable
+		}
 		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
 			if f := pickAndroidAudio(sd); f != nil {
 				if u, _ := f["url"].(string); u != "" {
@@ -569,6 +579,9 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 		}
 	}
 
+	if sabrErr != nil && strings.Contains(sabrErr.Error(), "UNPLAYABLE") {
+		return nil, ErrUnavailable
+	}
 	return c.ResolveHLS(ctx, videoID)
 }
 
