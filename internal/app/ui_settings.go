@@ -126,7 +126,7 @@ func (a *app) settingsModalView(c *ui.Context) {
 			// 2. Audio quality
 			ui.Column(c).FillWidth().Gap(6).Children(func() {
 				ui.Text(c, "音质设置").FontSize(14).Bold().TextColor(p.text)
-				ui.Text(c, "默认采用 AAC-LC 128 kbps 高清原声音频流，原生硬件解码").FontSize(12).TextColor(p.muted)
+				ui.Text(c, "使用 YouTube 提供的 AAC 原声音频流").FontSize(12).TextColor(p.muted)
 			})
 
 			// 3. Cache
