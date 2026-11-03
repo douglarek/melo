@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/png"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -704,7 +706,7 @@ func TestVideoToggleOnlyForVideoTracks(t *testing.T) {
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
 	if !tt.HasText("视频") {
-		t.Fatal("video track did not show the song/video switch")
+		t.Fatal("video track did not show the video tab")
 	}
 
 	audio := ytmusic.Track{ID: "audio1", Title: "Audio Song", DurationMs: 200000}
@@ -713,7 +715,7 @@ func TestVideoToggleOnlyForVideoTracks(t *testing.T) {
 	a.npVideoMode = false
 	tt.Frame()
 	if tt.HasText("视频") {
-		t.Fatal("audio-only track showed the video switch")
+		t.Fatal("audio-only track showed the video tab")
 	}
 }
 
@@ -1190,8 +1192,10 @@ func TestNowPlayingArtistLinkOpensArtist(t *testing.T) {
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 	// The player bar behind the overlay also shows the artist, so target the
-	// visible artist in the now-playing panel.
-	tt.ClickAt(195, 624)
+	// link of the now-playing panel.
+	if err := tt.Click("正在播放 · 罗文"); err != nil {
+		t.Fatalf("click artist link: %v", err)
+	}
 	tt.Frame()
 	if a.nowPlayingOpen {
 		t.Fatal("artist link should close the now playing overlay")
@@ -1223,7 +1227,7 @@ func TestVideoTrackDefaultsToAudio(t *testing.T) {
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 	if !tt.HasText("歌词") || !tt.HasText("视频") {
-		t.Fatal("now playing should show lyrics by default with a video switch")
+		t.Fatal("now playing should show lyrics by default with a video tab")
 	}
 }
 
@@ -1238,11 +1242,15 @@ func TestNowPlayingQueue(t *testing.T) {
 	tt := ui.NewTester(a.view, 1600, 1000)
 	tt.Frame()
 
-	if !tt.HasText("接下来") {
-		t.Fatal("expected an Up Next section")
+	if !tt.HasText("待播清单") {
+		t.Fatal("expected the queue tab")
 	}
+	if err := tt.Click("待播清单"); err != nil {
+		t.Fatalf("click queue tab failed: %v", err)
+	}
+	tt.Frame()
 	if !tt.HasText("搁浅") {
-		t.Fatal("expected the upcoming queue to show 搁浅")
+		t.Fatal("expected the queue pane to show 搁浅")
 	}
 
 	if err := tt.Click("搁浅"); err != nil {
@@ -1253,8 +1261,8 @@ func TestNowPlayingQueue(t *testing.T) {
 	if a.pl.Current() == nil || a.pl.Current().ID != "track3" {
 		t.Fatalf("expected queue click to play track3, got %+v", a.pl.Current())
 	}
-	if !tt.HasText("暂无待播歌曲") {
-		t.Error("expected the queue to be empty after jumping to the last track")
+	if !tt.HasText("晴天") || !tt.HasText("七里香") {
+		t.Error("the queue pane should keep listing the whole queue")
 	}
 }
 
@@ -1276,10 +1284,10 @@ func TestNowPlayingRelatedTab(t *testing.T) {
 	tt := ui.NewTester(a.view, 1600, 1000)
 	tt.Frame()
 	if tt.HasText("相关歌曲") {
-		t.Fatal("related content should be hidden while the queue tab is active")
+		t.Fatal("related content should be hidden while another tab is active")
 	}
 
-	if err := tt.Click("相关"); err != nil {
+	if err := tt.Click("相关推荐"); err != nil {
 		t.Fatalf("click related tab failed: %v", err)
 	}
 	tt.Frame()
@@ -1304,6 +1312,139 @@ func TestNowPlayingRelatedTab(t *testing.T) {
 	}
 	if a.route.page != pagePlaylist || a.route.id != "VLPL123" {
 		t.Fatalf("route = %+v, want playlist VLPL123", a.route)
+	}
+}
+
+func TestNowPlayingVideoTab(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{ID: "video1", Title: "视频曲目", Video: true, DurationMs: 200000}}, 0)
+	a.nowPlayingOpen = true
+	// Keep the video preparing, as it would while ffmpeg starts: offline the
+	// pane falls back to lyrics.
+	a.npVideoStarting = true
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("视频"); err != nil {
+		t.Fatalf("click video tab: %v", err)
+	}
+	tt.Frame()
+	if a.npPane != paneVideo {
+		t.Fatalf("pane = %v, want video", a.npPane)
+	}
+	if !tt.HasText("正在准备视频…") {
+		t.Fatal("video pane did not show its loading state")
+	}
+
+	if err := tt.Click("歌词"); err != nil {
+		t.Fatalf("click lyrics tab: %v", err)
+	}
+	tt.Frame()
+	if a.npPane != paneLyrics || a.npVideoMode {
+		t.Fatalf("pane = %v video = %v, want lyrics", a.npPane, a.npVideoMode)
+	}
+}
+
+func TestNowPlayingCloseAnimates(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{ID: "track1", Title: "晴天", DurationMs: 269000}}, 0)
+	a.nowPlayingOpen = true
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Advance(time.Second)
+	tt.Frame()
+	if err := tt.Click("收起正在播放"); err != nil {
+		t.Fatalf("click the close chevron: %v", err)
+	}
+	if a.nowPlayingOpen {
+		t.Fatal("the close chevron should start the view closing")
+	}
+
+	// It stays drawn as it sinks away, and the page under it takes clicks.
+	tt.Frame()
+	if !tt.HasText("收起正在播放") {
+		t.Fatal("the view should still draw while it closes")
+	}
+	if err := tt.Click("探索"); err != nil {
+		t.Fatalf("click the page under the closing view: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageExplore {
+		t.Fatalf("route = %v, want the page under the closing view", a.route.page)
+	}
+
+	tt.Advance(700 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("收起正在播放") {
+		t.Fatal("the view should be gone once its animation ends")
+	}
+	if a.npOpen {
+		t.Fatal("the view is still open after closing")
+	}
+}
+
+func TestVideoPaneStartsARestoredTrack(t *testing.T) {
+	a := newTestApp(t)
+	video := ytmusic.Track{ID: "video1", Title: "视频曲目", Video: true, DurationMs: 200000}
+	a.pl.Restore(player.Session{Queue: []ytmusic.Track{video}, At: 0, Volume: 1})
+	a.nowPlayingOpen = true
+	a.npPane = paneVideo
+	a.npVideoMode = true
+
+	asked := make(chan struct{}, 1)
+	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+		select {
+		case asked <- struct{}{}:
+		default:
+		}
+		return nil, errors.New("offline")
+	}
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	select {
+	case <-asked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the video pane did not start the stream of a restored track")
+	}
+}
+
+func TestPlayerBarQueueButtonOpensQueue(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{ID: "track1", Title: "晴天", DurationMs: 269000}}, 0)
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("打开播放队列"); err != nil {
+		t.Fatalf("click queue button: %v", err)
+	}
+	tt.Frame()
+	if !a.nowPlayingOpen || a.npPane != paneQueue {
+		t.Fatalf("open = %v pane = %v, want the queue pane", a.nowPlayingOpen, a.npPane)
+	}
+}
+
+func TestLyricsFollowPlayback(t *testing.T) {
+	a := newTestApp(t)
+	track := ytmusic.Track{ID: "track-lyrics", Title: "测试曲目", DurationMs: 300000}
+	a.pl.SetQueue([]ytmusic.Track{track}, 0)
+	a.pl.Seek(40 * time.Second)
+	lines := make([]ytmusic.LyricLine, 40)
+	for i := range lines {
+		lines[i] = ytmusic.LyricLine{TimeMs: int64(i) * 2000, Text: fmt.Sprintf("第 %d 行歌词", i+1)}
+	}
+	a.lyrics = &ytmusic.Lyrics{Synced: true, Lines: lines}
+	a.nowPlayingOpen = true
+
+	tt := ui.NewTester(a.view, 1400, 900)
+	for range 60 {
+		tt.Frame()
+	}
+	if a.npLyricsManual {
+		t.Fatal("following playback should not read as a manual scroll")
+	}
+	if a.npLyricScroll.Y <= 0 {
+		t.Fatalf("lyrics did not follow the line sung: y=%v target=%v", a.npLyricScroll.Y, a.npTargetY)
 	}
 }
 
@@ -1365,15 +1506,15 @@ func TestLyricsManualScroll(t *testing.T) {
 	tt := ui.NewTester(a.view, 1400, 900)
 	tt.Frame()
 
-	header, ok := tt.Find("歌词")
+	box, ok := tt.Find("歌词内容")
 	if !ok {
-		t.Fatal("lyrics header not found")
+		t.Fatal("lyrics pane not found")
 	}
 	if a.npLyricScroll.MaxY <= 0 {
 		t.Fatal("lyrics did not overflow, nothing to scroll")
 	}
 
-	tt.Scroll(header.X+100, header.Y+250, 0, 160)
+	tt.Scroll(box.X+box.W/2, box.Y+box.H/2, 0, 160)
 	tt.Frame()
 	if !a.npLyricsManual {
 		t.Fatal("scrolling lyrics should pause auto-follow")

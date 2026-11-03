@@ -260,6 +260,17 @@ type StreamInfo struct {
 	DurationMs    int64
 	ContentLength int64
 	HEAAC         bool
-	HLSPlaylist   string
-	Segments      []StreamSegment
+	// HasVideo says the stream carries a picture as well as sound.
+	HasVideo    bool
+	HLSPlaylist string
+	Segments    []StreamSegment
+}
+
+// VideoStream is a picture to show for a track, as ffmpeg takes it: a
+// progressive or adaptive format of the Android client, or the HLS manifest
+// iOS serves, which ffmpeg follows itself.
+type VideoStream struct {
+	URL       string
+	Format    string // "mp4", "webm" or "hls"
+	UserAgent string
 }

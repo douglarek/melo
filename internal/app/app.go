@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/internal/ffmpeg"
 	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -31,12 +32,24 @@ const (
 	pageSection
 )
 
-type npRightTab int
+// paneKind is a tab of the Now Playing view: the pane it shows beside the
+// cover.
+type paneKind int
 
 const (
-	npTabQueue npRightTab = iota
-	npTabRelated
+	paneLyrics paneKind = iota
+	paneQueue
+	paneRelated
+	paneVideo
 )
+
+// scrubState is the progress bar's own position: what it drags, and whether
+// the pointer holds it, which outranks where playback is until it is let go.
+type scrubState struct {
+	v    float64
+	held bool
+	drag bool
+}
 
 type route struct {
 	page   pageKind
@@ -126,18 +139,25 @@ type app struct {
 	npQueueScroll     ui.ScrollState
 	npRelatedScroll   ui.ScrollState
 	npLyricsManual    bool
-	npTab             npRightTab
+	npPane            paneKind
+	npOpen            bool
+	npRest            bool
+	npChangedAt       time.Time
+	npQueueJump       bool
+	npScrub           scrubState
 	relatedVideoID    string
 	relatedSections   []ytmusic.Section
 	relatedLoading    bool
 	relatedLoaded     bool
 	npTargetY         float32
 	npCurrentY        float32
+	npButtonTheme     mygo.ThemeSource
 	npVideoMode       bool
 	npVideoStarting   bool
 	npVideoSeq        int
 	npVideo           *ui.VideoPlayer
 	npVideoTrack      string
+	npVideoKick       string
 	lastPlayedTrackID string
 	memoryTimer       *time.Timer
 	notifyTrackID     string
@@ -269,6 +289,12 @@ func Run() error {
 
 func (a *app) boot() {
 	a.homeLoading = true
+	// Find ffmpeg before a video or HE-AAC track needs it, off the UI
+	// thread: the login shell it may ask takes a moment. A miss is fine,
+	// as the next video or HE-AAC track looks again.
+	go func() {
+		_, _ = ffmpeg.Resolve(a.ctx)
+	}()
 	go func() {
 		// Restore user session
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -543,11 +569,12 @@ func (a *app) syncNowPlayingLyrics() {
 	a.npTargetY = 0
 	a.npCurrentY = 0
 	a.npRelatedScroll = ui.ScrollState{}
+	a.npScrub = scrubState{}
 	a.relatedVideoID = ""
 	a.relatedSections = nil
 	a.relatedLoading = false
 	a.relatedLoaded = false
-	if a.npTab == npTabRelated && a.nowPlayingOpen {
+	if a.npPane == paneRelated && a.nowPlayingOpen {
 		a.loadRelated()
 	}
 

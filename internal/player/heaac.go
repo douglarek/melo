@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/douglarek/melo/internal/ffmpeg"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -39,8 +40,8 @@ func openHEAACStream(ctx context.Context, info *ytmusic.StreamInfo, cache *Cache
 }
 
 func transcodeHEAAC(ctx context.Context, src, dst string) error {
-	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
-		cmd := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-y", "-i", src, "-vn", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", dst)
+	if path, err := ffmpeg.Resolve(ctx); err == nil {
+		cmd := exec.CommandContext(ctx, path, "-v", "error", "-y", "-i", src, "-vn", "-c:a", "aac", "-b:a", "128k", "-f", "mp4", dst)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("HE-AAC transcode with ffmpeg: %w: %s", err, out)
 		}

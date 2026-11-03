@@ -581,20 +581,20 @@ func (a *app) coverBitmap(c *ui.Context, bmp *ui.Bitmap, size, radius float32) {
 
 // coverImage renders an artwork image or a graceful placeholder if still loading.
 func (a *app) coverImage(c *ui.Context, u string, size float32, radius float32) {
-	a.coverImageWith(c, u, size, radius, true)
+	a.coverImageTinted(c, u, size, radius, true, a.pal.card, a.pal.muted)
 }
 
 func (a *app) coverImageCached(c *ui.Context, u string, size float32, radius float32) {
-	a.coverImageWith(c, u, size, radius, false)
+	a.coverImageTinted(c, u, size, radius, false, a.pal.card, a.pal.muted)
 }
 
-func (a *app) coverImageWith(c *ui.Context, u string, size float32, radius float32, load bool) {
-	p := a.pal
-
-	box := ui.Box(c).Size(size, size).Radius(radius).Background(p.card).AlignItems(ui.Center).Justify(ui.Center)
+// coverImageTinted renders an artwork, and the colors its placeholder has
+// until it loads, for a view of a background other than the pages'.
+func (a *app) coverImageTinted(c *ui.Context, u string, size, radius float32, load bool, card, faint ui.Color) {
+	box := ui.Box(c).Size(size, size).Radius(radius).Background(card).AlignItems(ui.Center).Justify(ui.Center)
 	if u == "" {
 		box.Children(func() {
-			ui.Icon(c, iconMusic).Size(size*0.4, size*0.4).TextColor(p.muted)
+			ui.Icon(c, iconMusic).Size(size*0.4, size*0.4).TextColor(faint)
 		})
 		return
 	}
@@ -624,7 +624,7 @@ func (a *app) coverImageWith(c *ui.Context, u string, size float32, radius float
 		})
 	} else {
 		box.Children(func() {
-			ui.Icon(c, iconMusic).Size(size*0.4, size*0.4).TextColor(p.muted)
+			ui.Icon(c, iconMusic).Size(size*0.4, size*0.4).TextColor(faint)
 		})
 	}
 }

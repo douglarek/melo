@@ -189,8 +189,8 @@ func (a *app) playerBar(c *ui.Context) {
 			})
 		})
 
-		// 3. Right: Volume & Lyrics Button (Compact 150px, Shrink(0), never cut off)
-		ui.Row(c).Width(150).Shrink(0).Justify(ui.End).AlignItems(ui.Center).Gap(8).Children(func() {
+		// 3. Right: Volume & Now Playing Buttons (Compact, Shrink(0), never cut off)
+		ui.Row(c).Width(196).Shrink(0).Justify(ui.End).AlignItems(ui.Center).Gap(6).Children(func() {
 			vol := a.pl.Volume()
 			volIcon := iconVolume
 			if vol == 0 {
@@ -200,25 +200,45 @@ func (a *app) playerBar(c *ui.Context) {
 			}
 			ui.Icon(c, volIcon).Size(16, 16).TextColor(p.muted).Shrink(0)
 
-			volSlider := ui.Slider(c, &vol, 0, 1.0).Width(68).Shrink(0)
+			volSlider := ui.Slider(c, &vol, 0, 1.0).Width(64).Shrink(0)
 			if volSlider.Changed() {
 				a.pl.SetVolume(vol)
 			}
 
+			// Queue Button
+			queueBtn := ui.Box(c.Key("ctl-queue-btn")).Label("打开播放队列").Size(28, 28).Radius(14).
+				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+			if queueBtn.Hovered() || (a.nowPlayingOpen && a.npPane == paneQueue) {
+				queueBtn.Background(p.hover)
+			}
+			if queueBtn.Clicked() {
+				a.choosePane(paneQueue)
+				a.nowPlayingOpen = true
+			}
+			queueBtn.Children(func() {
+				col := p.muted
+				if a.nowPlayingOpen && a.npPane == paneQueue {
+					col = p.accent
+				}
+				ui.Icon(c, iconQueue).Size(16, 16).TextColor(col)
+			})
+
 			// Lyrics / Now Playing Button
-			npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
-			if a.nowPlayingOpen {
+			npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Label("打开歌词").Size(28, 28).Radius(14).
+				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+			if a.nowPlayingOpen && a.npPane == paneLyrics {
 				npBtn.Background(p.hover)
 			}
 			if npBtn.Hovered() {
 				npBtn.Background(p.hover)
 			}
 			if npBtn.Clicked() {
-				a.nowPlayingOpen = !a.nowPlayingOpen
+				a.choosePane(paneLyrics)
+				a.nowPlayingOpen = true
 			}
 			npBtn.Children(func() {
 				col := p.muted
-				if a.nowPlayingOpen {
+				if a.nowPlayingOpen && a.npPane == paneLyrics {
 					col = p.accent
 				}
 				ui.Icon(c, iconLyrics).Size(16, 16).TextColor(col)

@@ -426,15 +426,21 @@ func parseLRC(raw string, _ int64) (*Lyrics, error) {
 }
 
 // ResolveStream resolves playable audio for videoID (direct MP4 or HLS).
-func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo, error) {
-	// 1. First attempt: ANDROID client (reliable itag 18 stream)
-	androidPayload := map[string]any{
+// The user agents the player requests claim to be: streaming URLs are
+// signed for the client that asked.
+const (
+	androidUserAgent = "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip"
+	iosUserAgent     = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+)
+
+func androidPlayerPayload(videoID string) map[string]any {
+	return map[string]any{
 		"context": map[string]any{
 			"client": map[string]any{
 				"clientName":        "ANDROID",
 				"clientVersion":     "20.10.38",
 				"androidSdkVersion": 30,
-				"userAgent":         "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip",
+				"userAgent":         androidUserAgent,
 				"osName":            "Android",
 				"osVersion":         "11",
 				"hl":                "en",
@@ -443,64 +449,57 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 		},
 		"videoId": videoID,
 	}
+}
 
-	b, err := json.Marshal(androidPayload)
-	if err == nil {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, youtubeBaseURL+"player?alt=json", bytes.NewReader(b))
-		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip")
-			req.Header.Set("X-YouTube-Client-Name", "3")
-			req.Header.Set("X-YouTube-Client-Version", "20.10.38")
-			c.setPlayerAuth(req)
-
-			resp, err := c.httpClient.Do(req)
-			if err == nil {
-				defer resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					var pResp map[string]any
-					if json.NewDecoder(resp.Body).Decode(&pResp) == nil {
-						sd, _ := pResp["streamingData"].(map[string]any)
-						if sd != nil {
-							if f := pickAndroidAudio(sd); f != nil {
-								u, _ := f["url"].(string)
-								durMs := int64(0)
-								if dStr, ok := f["approxDurationMs"].(string); ok {
-									durMs, _ = strconv.ParseInt(dStr, 10, 64)
-								}
-								sampleRate := 44100
-								if sr, ok := f["audioSampleRate"].(string); ok {
-									if v, err := strconv.Atoi(sr); err == nil && v > 0 {
-										sampleRate = v
-									}
-								}
-								channels := 2
-								if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
-									channels = int(ch)
-								}
-								contentLength := int64(0)
-								if cl, ok := f["contentLength"].(string); ok {
-									contentLength, _ = strconv.ParseInt(cl, 10, 64)
-								}
-								return &StreamInfo{
-									VideoID:       videoID,
-									DirectURL:     u,
-									Format:        "mp4",
-									SampleRate:    sampleRate,
-									Channels:      channels,
-									DurationMs:    durMs,
-									ContentLength: contentLength,
-									HEAAC:         strings.Contains(u, "heaudio"),
-								}, nil
-							}
-						}
-					}
-				}
-			}
-		}
+func iosPlayerPayload(videoID string) map[string]any {
+	return map[string]any{
+		"context": map[string]any{
+			"client": map[string]any{
+				"clientName":    "IOS",
+				"clientVersion": "21.26.4",
+				"deviceMake":    "Apple",
+				"deviceModel":   "iPhone16,2",
+				"userAgent":     iosUserAgent,
+				"osName":        "iPhone",
+				"osVersion":     "18.3.2.22D82",
+				"hl":            "en",
+				"gl":            "US",
+			},
+		},
+		"videoId": videoID,
 	}
+}
 
-	return c.ResolveHLS(ctx, videoID)
+// player posts a player request, as the client named, and returns its
+// response.
+func (c *Client) player(ctx context.Context, payload map[string]any, clientName, clientVersion, userAgent string) (map[string]any, error) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, youtubeBaseURL+"player?alt=json", bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("X-YouTube-Client-Name", clientName)
+	req.Header.Set("X-YouTube-Client-Version", clientVersion)
+	c.setPlayerAuth(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("player request HTTP %d", resp.StatusCode)
+	}
+	var pResp map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&pResp); err != nil {
+		return nil, err
+	}
+	return pResp, nil
 }
 
 // setPlayerAuth attaches the signed-in session to a player request.
@@ -517,60 +516,70 @@ func (c *Client) setPlayerAuth(req *http.Request) {
 	}
 }
 
+func (c *Client) androidPlayer(ctx context.Context, videoID string) (map[string]any, error) {
+	return c.player(ctx, androidPlayerPayload(videoID), "3", "20.10.38", androidUserAgent)
+}
+
+func (c *Client) iosPlayer(ctx context.Context, videoID string) (map[string]any, error) {
+	return c.player(ctx, iosPlayerPayload(videoID), "5", "21.26.4", iosUserAgent)
+}
+
+// ResolveStream resolves the sound to play: the ANDROID client's, which is
+// reliable and progressive when it has it, or else the HLS one iOS serves.
+func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo, error) {
+	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
+		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
+			if f := pickAndroidAudio(sd); f != nil {
+				if u, _ := f["url"].(string); u != "" {
+					durMs := int64(0)
+					if dStr, ok := f["approxDurationMs"].(string); ok {
+						durMs, _ = strconv.ParseInt(dStr, 10, 64)
+					}
+					sampleRate := 44100
+					if sr, ok := f["audioSampleRate"].(string); ok {
+						if v, err := strconv.Atoi(sr); err == nil && v > 0 {
+							sampleRate = v
+						}
+					}
+					channels := 2
+					if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
+						channels = int(ch)
+					}
+					contentLength := int64(0)
+					if cl, ok := f["contentLength"].(string); ok {
+						contentLength, _ = strconv.ParseInt(cl, 10, 64)
+					}
+					return &StreamInfo{
+						VideoID:       videoID,
+						DirectURL:     u,
+						Format:        "mp4",
+						SampleRate:    sampleRate,
+						Channels:      channels,
+						DurationMs:    durMs,
+						ContentLength: contentLength,
+						HEAAC:         strings.Contains(u, "heaudio"),
+						HasVideo:      streamsVideo(f),
+					}, nil
+				}
+			}
+		}
+	}
+
+	return c.ResolveHLS(ctx, videoID)
+}
+
+// streamsVideo reports whether a player format carries a picture: the
+// progressive ones do, the adaptive audio ones do not.
+func streamsVideo(f map[string]any) bool {
+	mime, _ := f["mimeType"].(string)
+	return strings.HasPrefix(mime, "video/")
+}
+
 // ResolveHLS resolves an audio-only HLS stream through the iOS client.
 func (c *Client) ResolveHLS(ctx context.Context, videoID string) (*StreamInfo, error) {
-	reqPayload := map[string]any{
-		"context": map[string]any{
-			"client": map[string]any{
-				"clientName":    "IOS",
-				"clientVersion": "21.26.4",
-				"deviceMake":    "Apple",
-				"deviceModel":   "iPhone16,2",
-				"userAgent":     "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
-				"osName":        "iPhone",
-				"osVersion":     "18.3.2.22D82",
-				"hl":            "en",
-				"gl":            "US",
-			},
-		},
-		"videoId": videoID,
-	}
-
-	b, err := json.Marshal(reqPayload)
+	hlsManifestURL, err := c.hlsManifestURL(ctx, videoID)
 	if err != nil {
 		return nil, err
-	}
-
-	playerURL := youtubeBaseURL + "player?alt=json"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, playerURL, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)")
-	req.Header.Set("X-YouTube-Client-Name", "5")
-	req.Header.Set("X-YouTube-Client-Version", "21.26.4")
-	c.setPlayerAuth(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("player request HTTP %d", resp.StatusCode)
-	}
-
-	var pResp map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&pResp); err != nil {
-		return nil, err
-	}
-
-	streamingData, _ := pResp["streamingData"].(map[string]any)
-	hlsManifestURL, _ := streamingData["hlsManifestUrl"].(string)
-	if hlsManifestURL == "" {
-		return nil, errors.New("no hlsManifestUrl returned")
 	}
 
 	// Fetch master HLS playlist
@@ -604,6 +613,107 @@ func (c *Client) ResolveHLS(ctx context.Context, videoID string) (*StreamInfo, e
 		HLSPlaylist: audioPlaylistURL,
 		Segments:    segments,
 	}, nil
+}
+
+// hlsManifestURL returns the master playlist the iOS client serves, which
+// holds the video variants as well as the audio ones.
+func (c *Client) hlsManifestURL(ctx context.Context, videoID string) (string, error) {
+	pResp, err := c.iosPlayer(ctx, videoID)
+	if err != nil {
+		return "", err
+	}
+	streamingData, _ := pResp["streamingData"].(map[string]any)
+	u, _ := streamingData["hlsManifestUrl"].(string)
+	if u == "" {
+		return "", errors.New("no hlsManifestUrl returned")
+	}
+	return u, nil
+}
+
+// ResolveVideo resolves a stream with a picture for a track whose sound
+// stream has none: a video format of the Android client, or else the HLS
+// manifest iOS serves, which ffmpeg follows itself.
+func (c *Client) ResolveVideo(ctx context.Context, videoID string) (*VideoStream, error) {
+	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
+		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
+			if u, format := pickVideoURL(sd); u != "" {
+				return &VideoStream{URL: u, Format: format, UserAgent: androidUserAgent}, nil
+			}
+		}
+	}
+	if u, err := c.hlsManifestURL(ctx, videoID); err == nil && u != "" {
+		return &VideoStream{URL: u, Format: "hls", UserAgent: iosUserAgent}, nil
+	}
+	return nil, errors.New("no video stream found")
+}
+
+// pickVideoURL returns the URL of a video format in a player response and
+// its container: the progressive one when offered, else the adaptive video
+// format that costs least to decode.
+func pickVideoURL(sd map[string]any) (string, string) {
+	if formats, ok := sd["formats"].([]any); ok {
+		for _, raw := range formats {
+			f, _ := raw.(map[string]any)
+			itag, _ := f["itag"].(float64)
+			if itag != 18 {
+				continue
+			}
+			if u, _ := f["url"].(string); u != "" {
+				return u, "mp4"
+			}
+		}
+	}
+
+	best, bestFormat, bestScore := "", "", -1
+	adaptive, _ := sd["adaptiveFormats"].([]any)
+	for _, raw := range adaptive {
+		f, _ := raw.(map[string]any)
+		mime, _ := f["mimeType"].(string)
+		if !strings.HasPrefix(mime, "video/") {
+			continue
+		}
+		u, _ := f["url"].(string)
+		if u == "" {
+			continue
+		}
+		itag, _ := f["itag"].(float64)
+		if score := videoFormatScore(itag, mime); score > bestScore {
+			best, bestScore = u, score
+			bestFormat = "mp4"
+			if strings.Contains(mime, "webm") {
+				bestFormat = "webm"
+			}
+		}
+	}
+	return best, bestFormat
+}
+
+// videoFormatScore ranks a video format: H.264 at 720p and under first, as
+// it costs least to decode, then the rest.
+func videoFormatScore(itag float64, mime string) int {
+	switch itag {
+	case 136:
+		return 100 // 720p H.264
+	case 135:
+		return 90 // 480p H.264
+	case 134:
+		return 80 // 360p H.264
+	case 137:
+		return 70 // 1080p H.264
+	case 298:
+		return 60 // 720p60 H.264
+	case 299:
+		return 50 // 1080p60 H.264
+	}
+	switch {
+	case strings.Contains(mime, "avc1"):
+		return 40
+	case strings.Contains(mime, "av01"):
+		return 30
+	case strings.Contains(mime, "vp9"):
+		return 20
+	}
+	return 10
 }
 
 func (c *Client) fetchText(ctx context.Context, u string) (string, error) {

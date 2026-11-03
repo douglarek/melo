@@ -2,12 +2,42 @@ package app
 
 import (
 	"fmt"
-	"math"
+	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
+)
+
+// The Now Playing view fills the window with what plays: its cover over a
+// backdrop of the cover's own colors, the controls under it, and the pane
+// its tabs choose beside it.
+
+const (
+	// npMaxWidth is how wide the cover and the panes together go, at most.
+	npMaxWidth = 1360
+	// npTopBarHeight is the draggable strip along the top, holding the
+	// chevron that closes the view.
+	npTopBarHeight = 44
+	// npTabsHeight is how tall the row of tabs is.
+	npTabsHeight = 40
+	// npSideGap is the room between the cover's column and the pane.
+	npSideGap = 52
+	// npBottomPadding keeps the pane clear of the window's foot.
+	npBottomPadding = 24
+	// npSideBlock is how tall everything under the cover is, which the
+	// pane's first line is aligned with the cover's top by.
+	npSideBlock = 262
+)
+
+var (
+	npWhite = ui.RGB(255, 255, 255)
+	npInk   = ui.Hex("#0b0b0f")
+	npDeep  = ui.Hex("#0a0d15")
+	npCard  = ui.RGBA(255, 255, 255, 0.08)
 )
 
 // activeLyricLine returns the last line whose timestamp has been reached, or
@@ -28,475 +58,716 @@ func activeLyricLine(lines []ytmusic.LyricLine, synced bool, pos time.Duration) 
 	return active
 }
 
+// npPanes returns the tabs Now Playing shows for what plays: the video only
+// for a track that has one.
+func (a *app) npPanes(cur *ytmusic.Track) []paneKind {
+	panes := []paneKind{paneLyrics, paneQueue, paneRelated}
+	if cur != nil && cur.Video {
+		panes = append(panes, paneVideo)
+	}
+	return panes
+}
+
+func npPaneLabel(pane paneKind) string {
+	switch pane {
+	case paneQueue:
+		return "待播清单"
+	case paneRelated:
+		return "相关推荐"
+	case paneVideo:
+		return "视频"
+	default:
+		return "歌词"
+	}
+}
+
+func npPaneKey(pane paneKind) string {
+	switch pane {
+	case paneQueue:
+		return "queue"
+	case paneRelated:
+		return "related"
+	case paneVideo:
+		return "video"
+	default:
+		return "lyrics"
+	}
+}
+
+// choosePane shows pane in Now Playing, remembering where playback stands so
+// that the queue opens at the track playing.
+func (a *app) choosePane(pane paneKind) {
+	if pane == paneVideo {
+		if cur := a.pl.Current(); cur == nil || !cur.Video {
+			return
+		}
+	}
+	a.npPane = pane
+	if pane == paneVideo {
+		a.npVideoMode = true
+		// A click on the tab asks again for a stream that did not load.
+		a.npVideoKick = ""
+	} else {
+		a.npVideoMode = false
+		a.closeVideo()
+	}
+	switch pane {
+	case paneRelated:
+		a.loadRelated()
+	case paneQueue:
+		a.npQueueJump = true
+	}
+}
+
+// closeNowPlaying starts hiding the view, which stops any video playing in
+// it once it is gone.
+func (a *app) closeNowPlaying() {
+	a.nowPlayingOpen = false
+}
+
+// npSpring is how Now Playing comes and goes.
+var npSpring = ui.Animation{Spring: ui.SpringOptions{Duration: 450 * time.Millisecond, Bounce: 0.08}}
+
+// npSettle is how long Now Playing takes to come or go, its spring at rest.
+const npSettle = 600 * time.Millisecond
+
+// nowPlayingLayer holds Now Playing over the whole window, rising into view
+// as it opens and sinking away as it closes: it moves itself, staying on
+// top all the way, rather than leaving at once, which would blink it away
+// over the page under it. Its pose moves it in frames that only paint,
+// building nothing.
+func (a *app) nowPlayingLayer(c *ui.Context) {
+	open := a.nowPlayingOpen && a.pl.Current() != nil
+	now := c.Now()
+	if open != a.npOpen {
+		a.npOpen = open
+		a.npChangedAt = now
+		a.npRest = false
+		// A build once it is at rest: to stop painting what it covers, or
+		// itself once gone.
+		c.After(npSettle)
+	}
+	settled := now.Sub(a.npChangedAt) >= npSettle
+	layer := ui.Box(c.Key("now-playing-layer")).Absolute().Top(0).Left(0).Right(0).Bottom(0)
+	pose := ui.Pose{Y: 60, Fade: 1}
+	if open {
+		pose = ui.Pose{}
+	}
+	layer.AnimatePose(pose, npSpring)
+	if !open && settled {
+		// Closed: nothing to paint or click. The video stops once it is
+		// gone, not as it goes, which would start it again in the pane.
+		if !a.npRest {
+			a.npRest = true
+			a.closeVideo()
+		}
+		layer.Invisible()
+		return
+	}
+	if !open {
+		// On its way out, the window under it takes the clicks.
+		layer.PassThrough().IgnoreInput(true)
+	}
+	layer.Children(func() { a.nowPlayingView(c) })
+}
+
+// syncNowPlayingWindowButtons lights the window's buttons for the dark view
+// while it shows, and back for the appearance's own once it is gone.
+func (a *app) syncNowPlayingWindowButtons() {
+	if a.win == nil {
+		return
+	}
+	src := mygo.ThemeSystem
+	switch a.settings.Appearance {
+	case "dark":
+		src = mygo.ThemeDark
+	case "light":
+		src = mygo.ThemeLight
+	}
+	if a.nowPlayingOpen {
+		src = mygo.ThemeDark
+	}
+	if a.npButtonTheme == src {
+		return
+	}
+	a.npButtonTheme = src
+	a.win.SetWindowButtonsTheme(src)
+}
+
+// npSideInset is how far in from the sides the cover and the pane sit: in a
+// wide window they keep together in the middle.
+func npSideInset(w float32) float32 {
+	return max(48, (w-npMaxWidth)/2)
+}
+
+// npSideWidth is how wide the cover's column is.
+func npSideWidth(w float32) float32 {
+	return min(max(w*0.28, 248), 380)
+}
+
+// npTint is the average color of a cover, which the backdrop takes.
+func (a *app) npTint(u string) ui.Color {
+	tint := ui.Hex("#464d68")
+	if u != "" && a.art != nil {
+		for _, side := range []int{artLargeSide, artMediumSide, artSmallSide} {
+			if art := a.art.cached(u, side); art != nil && art.color.A > 0 {
+				tint = art.color
+				break
+			}
+		}
+	}
+	// Averages run grey; the brightest channel at 150 restores the hue's
+	// saturation, which the backdrop wants.
+	mx := max(tint.R, tint.G, tint.B)
+	if mx < 40 {
+		return tint
+	}
+	f := float32(150) / float32(mx)
+	ch := func(v uint8) uint8 { return uint8(min(255, float32(v)*f)) }
+	return ui.RGB(ch(tint.R), ch(tint.G), ch(tint.B))
+}
+
 func (a *app) nowPlayingView(c *ui.Context) {
-	p := a.pal
 	cur := a.pl.Current()
 	if cur == nil {
 		a.nowPlayingOpen = false
 		a.closeVideo()
 		return
 	}
-	if !cur.Video {
+	if !cur.Video && (a.npVideoMode || a.npVideo != nil || a.npVideoStarting) {
 		a.npVideoMode = false
 		a.closeVideo()
 	}
+	if a.npPane == paneVideo && (!cur.Video || (!a.npVideoMode && !a.npVideoStarting)) {
+		a.npPane = paneLyrics
+	}
 
-	// Request frequent frames for smooth lyrics scrolling & visualizer
+	// Request frequent frames for smooth lyrics scrolling and the scrubber.
 	if a.pl.Playing() {
 		c.After(100 * time.Millisecond)
 	}
+	a.npShortcuts(c)
 
-	// Full-screen overlay
-	overlay := ui.Box(c.Key("now-playing-overlay")).Absolute().Fill().Background(p.bg)
+	w, h := c.Size()
+	tint := a.npTint(cur.Thumbnail)
+	overlay := ui.Box(c.Key("now-playing-overlay")).Absolute().Fill()
+	overlay.LinearGradient(ui.LinearGradient{
+		From:  tint.Mix(npDeep, 0.62),
+		To:    npDeep,
+		Angle: 180,
+		Oklab: true,
+	})
 	overlay.Children(func() {
-		ui.Column(c).Fill().Padding(24, 36).Children(func() {
-			// Top bar with close button
-			npTopBar := ui.Row(c.Key("np-top-bar")).FillWidth().Height(44).AlignItems(ui.Center).DragWindow()
-			if npTopBar.DoubleClicked() {
-				a.toggleMaximize()
-			}
-			npTopBar.Children(func() {
-				closeBtn := ui.Box(c.Key("np-close")).Size(36, 36).Radius(18).Background(p.card).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
-				if closeBtn.Hovered() {
-					closeBtn.Background(p.hover)
-				}
-				if closeBtn.Clicked() {
-					a.nowPlayingOpen = false
-					a.closeVideo()
-				}
-				closeBtn.Children(func() {
-					ui.Icon(c, iconClose).Size(18, 18).TextColor(p.text)
-				})
-
-				ui.Spacer(c)
-				if cur.Video {
-					a.nowPlayingModeSwitch(c)
-				} else {
-					ui.Text(c, "正在播放").FontSize(14).Bold().TextColor(p.muted)
-				}
-				ui.Spacer(c)
-				ui.Box(c).Size(36, 36)
-			})
-
-			// Main area: video, or artwork/lyrics and the upcoming queue.
-			if a.npVideoMode && cur.Video {
-				a.nowPlayingVideo(c)
-				return
-			}
-			ui.Row(c).Grow(1).FillWidth().Margin(24, 0).Gap(32).Children(func() {
-				// Left Column: Artwork + Visualizer + Title
-				ui.Column(c).Width(320).FillHeight().AlignItems(ui.Center).Justify(ui.Center).Gap(20).Children(func() {
-					// Large Cover Artwork
-					a.coverImage(c, cur.Thumbnail, 300, 16)
-
-					// Visualizer Spectrum Bars
-					spectrum := a.pl.Spectrum()
-					ui.Row(c).Height(24).AlignItems(ui.End).Gap(4).Children(func() {
-						for idx, val := range spectrum {
-							barH := max(4, float32(val*24))
-							ui.Box(c.Key(fmt.Sprintf("spec-%d", idx))).Width(4).Height(barH).Radius(2).Background(p.accent)
-						}
-					})
-
-					// Track title & artist
-					ui.Column(c).AlignItems(ui.Center).Gap(6).Children(func() {
-						ui.Text(c, cur.Title).FontSize(22).Bold().TextColor(p.text).TextAlign(ui.Center)
-						a.artistLinks(c, *cur, p.muted, p.text)
-					})
-				})
-
-				// Middle Column: Lyrics
-				ui.Column(c).Grow(1).Basis(0).FillHeight().Children(func() {
-					ui.Row(c).FillWidth().Height(40).AlignItems(ui.Center).Gap(20).Children(func() {
-						ui.Text(c, "歌词").FontSize(18).Bold().TextColor(p.text)
-						if a.lyrics != nil && !a.lyrics.Synced {
-							ui.Text(c, "未同步").FontSize(11).TextColor(p.faint)
-						}
-						if a.npLyricsManual {
-							followBtn := ui.Row(c.Key("lyrics-follow")).Height(28).Radius(14).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
-							if followBtn.Hovered() {
-								followBtn.Background(p.hover)
-							}
-							if followBtn.Clicked() {
-								a.npLyricsManual = false
-								a.npCurrentY = a.npLyricScroll.Y
-								c.Invalidate()
-							}
-							followBtn.Children(func() {
-								ui.Text(c, "跟随播放").FontSize(12).TextColor(p.text)
-							})
-						}
-						ui.Spacer(c)
-					})
-
-					ui.Box(c).Grow(1).FillWidth().Margin(12, 0).Children(func() {
-						if a.lyricsLoading {
-							ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
-								ui.Spinner(c)
-								ui.Text(c, "正在加载歌词...").FontSize(14).TextColor(p.muted)
-							})
-							return
-						}
-
-						if a.lyrics == nil || len(a.lyrics.Lines) == 0 {
-							ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-								ui.Text(c, "暂无歌词").FontSize(16).TextColor(p.faint)
-							})
-							return
-						}
-
-						// Synchronized lyric scrolling. Plain lyrics have no
-						// active line.
-						synced := a.lyrics.Synced
-						curLine := activeLyricLine(a.lyrics.Lines, synced, a.pl.Position())
-
-						// Calculate target scroll offset (approx 46px per line, center active line at ~35% height)
-						const lineStep = float32(46)
-						targetY := float32(curLine)*lineStep - 120
-						if targetY < 0 {
-							targetY = 0
-						}
-						a.npTargetY = targetY
-
-						// Hand the scroll position to the user when they scroll or drag
-						// the lyrics bar; playback keeps highlighting lines meanwhile.
-						expectedY := a.npCurrentY
-						if a.npLyricScroll.MaxY > 0 && expectedY > a.npLyricScroll.MaxY {
-							expectedY = a.npLyricScroll.MaxY
-						}
-						if !a.npLyricsManual && math.Abs(float64(a.npLyricScroll.Y-expectedY)) > 4 {
-							a.npLyricsManual = true
-						}
-
-						if !a.npLyricsManual {
-							diff := a.npTargetY - a.npCurrentY
-							if math.Abs(float64(diff)) > 0.5 {
-								a.npCurrentY += diff * 0.15
-								a.npLyricScroll.Y = a.npCurrentY
-								c.AnimationFrame()
-							} else {
-								a.npCurrentY = a.npTargetY
-								a.npLyricScroll.Y = a.npTargetY
-							}
-						}
-
-						ui.Scroll(c.Key("lyrics-scroll")).Vertical().TrackScroll(&a.npLyricScroll).Fill().Children(func() {
-							ui.Column(c).FillWidth().Gap(14).Padding(60, 20, 240, 20).Children(func() {
-								for i, line := range a.lyrics.Lines {
-									idx := i
-									l := line
-									active := synced && idx == curLine
-
-									lineBox := ui.Row(c.Key(fmt.Sprintf("lyric-row-%d", idx))).FillWidth().Radius(8).Padding(6, 12)
-									if synced {
-										lineBox.Cursor(ui.CursorPointer)
-									}
-									if lineBox.Hovered() && !active {
-										lineBox.Background(p.hover)
-									}
-									if synced && lineBox.Clicked() {
-										a.npLyricsManual = false
-										a.npCurrentY = a.npLyricScroll.Y
-										a.pl.Seek(time.Duration(l.TimeMs) * time.Millisecond)
-									}
-
-									lineBox.Children(func() {
-										lineText := ui.Text(c, l.Text)
-										if active {
-											lineText.Bold().FontSize(24).TextColor(p.text)
-										} else {
-											lineText.FontSize(17).TextColor(p.muted)
-										}
-									})
-								}
-							})
-						})
-					})
-				})
-
-				// Right Column: Up Next / Related
-				a.nowPlayingRightPanel(c)
-			})
+		a.npBackdrop(c, tint, w)
+		ui.Column(c).Fill().Children(func() {
+			a.npTopBar(c)
+			a.npTabs(c, cur, w, h)
+			a.npBody(c, cur, w, h)
 		})
 	})
 }
 
-// nowPlayingRightPanel shows either the playback queue or related content.
-func (a *app) nowPlayingRightPanel(c *ui.Context) {
-	tracks, at := a.pl.QueueView()
-	start := at + 1
-	if start < 0 {
-		start = 0
-	}
-	upNext := 0
-	if start < len(tracks) {
-		upNext = len(tracks) - start
-	}
-
-	ui.Column(c).Width(a.npRightWidth()).FillHeight().Children(func() {
-		ui.Row(c).FillWidth().Height(44).AlignItems(ui.Center).Gap(22).Children(func() {
-			a.npTabButton(c, "接下来", npTabQueue, "np-tab-queue", upNext)
-			a.npTabButton(c, "相关", npTabRelated, "np-tab-related", 0)
-		})
-
-		ui.Box(c).Grow(1).FillWidth().Margin(16, 0).Children(func() {
-			if a.npTab == npTabRelated {
-				a.nowPlayingRelated(c)
-				return
-			}
-			a.nowPlayingQueueList(c, tracks, start)
-		})
+// npBackdrop adds the cover's color, gathered at the top of the view, to the
+// backdrop's gradient.
+func (a *app) npBackdrop(c *ui.Context, tint ui.Color, w float32) {
+	ui.Box(c.Key("np-glow")).Absolute().Fill().PassThrough().RadialGradient(ui.RadialGradient{
+		Center: ui.Point{X: 0.3, Y: -0.04},
+		Radius: max(560, w*0.8),
+		Oklab:  true,
+		Stops: []ui.GradientStop{
+			{Color: tint.Alpha(0.28), At: 0},
+			{Color: tint.Alpha(0.08), At: 0.55},
+			{Color: ui.Transparent, At: 1},
+		},
 	})
 }
 
-func (a *app) npRightWidth() float32 {
-	if a.win == nil {
-		return 480
-	}
-	w, _ := a.win.ContentSize()
-	if w <= 0 {
-		return 480
-	}
-	pw := float32(w) * 0.30
-	if pw < 320 {
-		pw = 320
-	}
-	if pw > 520 {
-		pw = 520
-	}
-	return pw
-}
-
-func (a *app) npTabButton(c *ui.Context, label string, tab npRightTab, key string, count int) {
-	p := a.pal
-	active := a.npTab == tab
-	col := p.muted
-	if active {
-		col = p.accent
-	}
-
-	btn := ui.Row(c.Key(key)).Height(44).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
-	if btn.Clicked() {
-		a.npTab = tab
-		if tab == npTabRelated {
-			a.loadRelated()
+// npShortcuts binds Esc to closing the view and ⌘1 to ⌘4 to its tabs.
+func (a *app) npShortcuts(c *ui.Context) {
+	c.OnShortcut(0, ui.KeyEscape, a.closeNowPlaying)
+	for i, pane := range a.npPanes(a.pl.Current()) {
+		if i >= 4 {
+			break
 		}
+		p := pane
+		c.OnShortcut(ui.Cmd, ui.Key(int(ui.Key1)+i), func() {
+			a.choosePane(p)
+			c.Invalidate()
+		})
+	}
+}
+
+func (a *app) npTopBar(c *ui.Context) {
+	bar := ui.Row(c.Key("np-top-bar")).FillWidth().Height(npTopBarHeight).AlignItems(ui.Center).Justify(ui.Center).DragWindow()
+	if bar.DoubleClicked() {
+		a.toggleMaximize()
+	}
+	bar.Children(func() {
+		close := ui.Box(c.Key("np-close")).Label("收起正在播放").Size(34, 34).Radius(17).
+			AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
+		bg := ui.RGBA(255, 255, 255, 0.06)
+		if close.Hovered() {
+			bg = ui.RGBA(255, 255, 255, 0.16)
+		}
+		close.Background(bg)
+		if close.Clicked() {
+			a.closeNowPlaying()
+		}
+		close.Children(func() {
+			ui.Icon(c, iconChevron).Size(18, 18).TextColor(npWhite.Alpha(0.8))
+		})
+	})
+}
+
+func (a *app) npTabs(c *ui.Context, cur *ytmusic.Track, w, h float32) {
+	m := npMetrics(w, h)
+	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, m.inset, 0, m.paneX).
+		AlignItems(ui.Center).Gap(4).Children(func() {
+		for _, pane := range a.npPanes(cur) {
+			a.npTabButton(c, pane)
+		}
+		ui.Spacer(c)
+		a.npLyricsBadges(c)
+	})
+}
+
+// npLyricsBadges say what the lyrics are, and resume following them after
+// the listener scrolled them, beside the tabs.
+func (a *app) npLyricsBadges(c *ui.Context) {
+	if a.npPane != paneLyrics || a.lyrics == nil {
+		return
+	}
+	if !a.lyrics.Synced {
+		badge := ui.Row(c.Key("lyrics-plain")).Padding(2, 8).Radius(6).Background(npWhite.Alpha(0.08)).
+			AlignItems(ui.Center)
+		badge.Children(func() {
+			ui.Text(c, "纯文本歌词").FontSize(11).FontWeight(600).TextColor(npWhite.Alpha(0.5))
+		})
+		return
+	}
+	if !a.npLyricsManual {
+		return
+	}
+	follow := ui.Row(c.Key("lyrics-follow")).Label("跟随播放").Height(28).Radius(14).
+		Background(npWhite.Alpha(0.12)).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+	if follow.Hovered() {
+		follow.Background(npWhite.Alpha(0.2))
+	}
+	if follow.Clicked() {
+		a.npLyricsManual = false
+		a.npCurrentY = a.npLyricScroll.Y
 		c.Invalidate()
 	}
+	follow.Children(func() {
+		ui.Text(c, "跟随播放").FontSize(12).TextColor(npWhite)
+	})
+}
+
+func (a *app) npTabButton(c *ui.Context, pane paneKind) {
+	label := npPaneLabel(pane)
+	active := a.npPane == pane
+	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14).Radius(999).
+		FocusRing(false).Label(label).Cursor(ui.CursorPointer).Gap(6)
+	bg := ui.Transparent
+	fg := npWhite.Alpha(0.55)
+	switch {
+	case active:
+		bg = npWhite.Alpha(0.14)
+		fg = npWhite
+	case btn.Hovered():
+		bg = npWhite.Alpha(0.07)
+	}
+	btn.Background(bg)
 	btn.Children(func() {
-		text := ui.Text(c, label).FontSize(18).Bold().TextColor(col)
-		if active {
-			text.BorderWidth(0, 0, 2, 0).BorderColor(p.accent)
-		}
-		if count > 0 {
-			ui.Text(c, fmt.Sprintf("%d", count)).FontSize(11).TextColor(col)
+		ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(fg)
+		if pane == paneQueue {
+			if tracks, at := a.pl.QueueView(); len(tracks) > 0 {
+				ui.Text(c, fmt.Sprint(max(0, len(tracks)-max(at+1, 0)))).
+					FontSize(11).FontWeight(600).TextColor(fg.Alpha(0.6))
+			}
 		}
 	})
+	if btn.Clicked() {
+		a.choosePane(pane)
+	}
 }
 
-func (a *app) nowPlayingQueueList(c *ui.Context, tracks []ytmusic.Track, start int) {
-	p := a.pal
-	if start >= len(tracks) {
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-			ui.Text(c, "暂无待播歌曲").FontSize(14).TextColor(p.faint)
-		})
-		return
-	}
-
-	ui.Scroll(c.Key("np-queue-scroll")).Vertical().TrackScroll(&a.npQueueScroll).Fill().Children(func() {
-		ui.Column(c).FillWidth().Gap(4).Padding(0, 0, 24, 0).Children(func() {
-			for i := start; i < len(tracks); i++ {
-				idx := i
-				t := tracks[i]
-				a.npTrackRow(c, fmt.Sprintf("np-queue-%d", idx), t, func() {
-					a.pl.PlayAt(idx)
-				})
-			}
-		})
-	})
+// npLayout is where the cover and the pane beside it lie in a window w×h.
+type npLayout struct {
+	inset   float32
+	sideW   float32
+	cover   float32
+	paneX   float32
+	paneW   float32
+	rowH    float32
+	paneTop float32
 }
 
-func (a *app) npTrackRow(c *ui.Context, key string, t ytmusic.Track, onClick func()) {
-	p := a.pal
-	row := ui.Row(c.Key(key)).FillWidth().Height(52).Radius(8).Padding(0, 8).AlignItems(ui.Center).Gap(10).Cursor(ui.CursorPointer)
-	if row.Hovered() {
-		row.Background(p.hover)
+func npMetrics(w, h float32) npLayout {
+	inset := npSideInset(w)
+	sideW := npSideWidth(w)
+	cover := min(sideW, max(160, h*0.40))
+	sideW = max(cover, 264)
+	rowH := h - npTopBarHeight - npTabsHeight - npBottomPadding
+	paneX := inset + sideW + npSideGap
+	return npLayout{
+		inset:   inset,
+		sideW:   sideW,
+		cover:   cover,
+		paneX:   paneX,
+		paneW:   w - inset - paneX,
+		rowH:    rowH,
+		paneTop: max(0, (rowH-cover-npSideBlock)/2),
 	}
-	if row.Clicked() {
-		onClick()
-	}
-	row.Children(func() {
-		a.coverImage(c, t.Thumbnail, 36, 6)
-		ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
-			ui.Text(c, t.Title).FontSize(13).TextColor(p.text).SingleLine().Tooltip(t.Title)
-			ui.Text(c, t.ArtistNames()).FontSize(11).TextColor(p.muted).SingleLine().Tooltip(t.ArtistNames())
-		})
-		if t.DurationMs > 0 {
-			ui.Text(c, t.DurationString()).FontSize(11).TextColor(p.muted).Width(38)
-		}
-	})
 }
 
-func (a *app) nowPlayingRelated(c *ui.Context) {
-	p := a.pal
-	if !a.relatedLoaded && !a.relatedLoading {
-		a.loadRelated()
-	}
-	if a.relatedLoading {
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
-			ui.Spinner(c)
-			ui.Text(c, "正在加载相关推荐...").FontSize(13).TextColor(p.muted)
-		})
-		return
-	}
+func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
+	m := npMetrics(w, h)
 
-	var trackShelf, playlistShelf *ytmusic.Section
-	for i := range a.relatedSections {
-		sec := &a.relatedSections[i]
-		if len(sec.Items) == 0 {
-			continue
-		}
-		switch sec.Items[0].Type {
-		case "track":
-			if trackShelf == nil {
-				trackShelf = sec
-			}
-		case "playlist":
-			if playlistShelf == nil {
-				playlistShelf = sec
-			}
-		}
-	}
-	if trackShelf == nil && playlistShelf == nil {
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-			ui.Text(c, "暂无相关推荐").FontSize(14).TextColor(p.faint)
+	ui.Row(c.Key("np-body")).Grow(1).FillWidth().Padding(0, m.inset, npBottomPadding, m.inset).
+		Gap(npSideGap).AlignItems(ui.Stretch).Children(func() {
+		ui.Column(c.Key("np-side")).Width(m.sideW).FillHeight().Justify(ui.Center).Children(func() {
+			a.npCover(c, cur, m.cover)
+			a.npInfo(c, cur)
+			a.npScrubber(c)
+			a.npTimes(c)
+			a.npTransport(c)
+			a.npVolume(c)
 		})
-		return
-	}
 
-	ui.Scroll(c.Key("np-related-scroll")).Vertical().TrackScroll(&a.npRelatedScroll).Fill().Children(func() {
-		ui.Column(c).FillWidth().Gap(20).Padding(0, 0, 24, 0).Children(func() {
-			if trackShelf != nil {
-				ui.Column(c).FillWidth().Gap(4).Children(func() {
-					ui.Text(c, shelfTitle(trackShelf.Title, "你可能还喜欢")).FontSize(15).Bold().TextColor(p.text)
-					var relatedTracks []ytmusic.Track
-					for _, item := range trackShelf.Items {
-						if item.Track != nil {
-							relatedTracks = append(relatedTracks, *item.Track)
-						}
-					}
-					for i, t := range relatedTracks {
-						idx := i
-						track := t
-						a.npTrackRow(c, fmt.Sprintf("np-related-track-%d", idx), track, func() {
-							a.pl.SetQueue(relatedTracks, idx)
-						})
-					}
-				})
+		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().Children(func() {
+			// The video takes the pane whole, centered under the tabs, where
+			// the other panes start level with the cover.
+			paneH := m.rowH
+			if a.npPane != paneVideo && m.paneTop > 0 {
+				ui.Box(c).Height(m.paneTop)
+				paneH -= m.paneTop
 			}
-			if playlistShelf != nil {
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, shelfTitle(playlistShelf.Title, "推荐的播放列表")).FontSize(15).Bold().TextColor(p.text)
-					panelW := a.npRightWidth()
-					cols := 2
-					if panelW >= 420 {
-						cols = 3
-					}
-					const gap = float32(8)
-					cardW := (panelW - 12 - gap*float32(cols-1)) / float32(cols)
-					for i := 0; i < len(playlistShelf.Items); i += cols {
-						ui.Row(c).FillWidth().Gap(gap).Children(func() {
-							for j := 0; j < cols && i+j < len(playlistShelf.Items); j++ {
-								idx := i + j
-								a.npRelatedCard(c, fmt.Sprintf("np-related-card-%d", idx), playlistShelf.Items[idx], cardW)
-							}
-						})
-					}
-				})
-			}
+			a.npPaneContent(c, cur, m.paneW, paneH)
 		})
 	})
 }
 
-func shelfTitle(title, fallback string) string {
-	if title == "" {
-		return fallback
+func (a *app) npCover(c *ui.Context, cur *ytmusic.Track, size float32) {
+	box := ui.Box(c.Key("np-cover")).Size(size, size).Radius(12).
+		Shadow(0, 26, 52, -18, ui.RGBA(0, 0, 0, 0.7)).Cursor(ui.CursorPointer)
+	// The cover breathes as music plays, and settles as it pauses.
+	scale := float32(1)
+	if !a.pl.Playing() {
+		scale = 0.965
 	}
-	return title
-}
-
-func (a *app) npRelatedCard(c *ui.Context, key string, item ytmusic.CardItem, width float32) {
-	p := a.pal
-	card := ui.Column(c.Key(key)).Width(width).Gap(6).Cursor(ui.CursorPointer)
-	if card.Clicked() {
-		a.nowPlayingOpen = false
-		a.closeVideo()
-		switch item.Type {
-		case "playlist":
-			a.open(route{page: pagePlaylist, id: item.ID})
-		case "album":
-			a.open(route{page: pageAlbum, id: item.ID})
-		case "artist":
-			a.open(route{page: pageArtist, id: item.ID})
-		}
+	box.AnimatePose(ui.Pose{Scale: scale}, ui.Animation{Spring: ui.SpringOptions{
+		Duration: 650 * time.Millisecond, Bounce: 0.12,
+	}})
+	if box.Clicked() {
+		a.pl.TogglePlay()
 	}
-	card.Children(func() {
-		a.coverImage(c, item.Thumbnail, width, 8)
-		ui.Text(c, item.Title).FontSize(12).Bold().TextColor(p.text).MaxLines(2).Tooltip(item.Title)
-		if item.Subtitle != "" {
-			ui.Text(c, item.Subtitle).FontSize(11).TextColor(p.muted).SingleLine().Tooltip(item.Subtitle)
-		}
-	})
-}
-
-func (a *app) nowPlayingModeSwitch(c *ui.Context) {
-	p := a.pal
-	ui.Row(c).Height(30).Radius(15).Background(p.card).Padding(2).AlignItems(ui.Center).Children(func() {
-		for _, opt := range []struct {
-			key   string
-			label string
-			video bool
-		}{
-			{"np-mode-song", "歌曲", false},
-			{"np-mode-video", "视频", true},
-		} {
-			opt := opt
-			active := a.npVideoMode == opt.video
-			bg := ui.Transparent
-			col := p.muted
-			if active {
-				bg = p.text
-				col = p.sidebar
-			}
-			btn := ui.Box(c.Key(opt.key)).Height(26).Radius(13).Background(bg).Padding(0, 12).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
-			if btn.Clicked() {
-				a.npVideoMode = opt.video
-				if !opt.video {
-					a.closeVideo()
-				}
-				c.Invalidate()
-			}
-			btn.Children(func() {
-				t := ui.Text(c, opt.label).FontSize(12).TextColor(col)
-				if active {
-					t.Bold()
-				}
-			})
-		}
-	})
-}
-
-func (a *app) nowPlayingVideo(c *ui.Context) {
-	p := a.pal
-	ui.Box(c).Grow(1).FillWidth().Margin(24, 0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		a.ensureVideo(c)
-		if a.npVideo == nil {
-			ui.Column(c).AlignItems(ui.Center).Gap(10).Children(func() {
-				ui.Spinner(c)
-				ui.Text(c, "正在准备视频...").FontSize(13).TextColor(p.muted)
+	box.Children(func() {
+		if cur.Thumbnail == "" {
+			ui.Box(c).Fill().Radius(12).Background(npCard).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				ui.Icon(c, iconMusic).Size(size*0.3, size*0.3).TextColor(npWhite.Alpha(0.35))
 			})
 			return
 		}
-		ui.Video(c, a.npVideo).Fill().Fit(ui.Contain)
+		a.coverImageTinted(c, cur.Thumbnail, size, 12, true, npCard, npWhite.Alpha(0.35))
 	})
+}
+
+func (a *app) npInfo(c *ui.Context, cur *ytmusic.Track) {
+	ui.Column(c).FillWidth().Margin(26, 0, 0, 0).Gap(6).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
+			ui.Text(c, cur.Title).FontSize(22).FontWeight(700).LetterSpacing(-0.3).TextColor(npWhite).
+				SingleLine().Grow(1).MinWidth(0).Tooltip(cur.Title)
+			a.npLikeButton(c, *cur)
+			a.npMoreButton(c, *cur)
+		})
+		a.npArtists(c, *cur)
+	})
+}
+
+func (a *app) npLikeButton(c *ui.Context, t ytmusic.Track) {
+	liked := a.isLiked(t.ID)
+	label := "喜欢 " + t.Title
+	if liked {
+		label = "取消喜欢 " + t.Title
+	}
+	btn := ui.Box(c.Key("np-like")).Label(label).Size(30, 30).Radius(15).
+		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+	if btn.Hovered() {
+		btn.Background(ui.RGBA(255, 255, 255, 0.1))
+	}
+	if btn.Clicked() {
+		a.toggleLike(t)
+		c.Invalidate()
+	}
+	btn.Children(func() {
+		if liked {
+			ui.Icon(c, iconHeartFill).Size(18, 18).TextColor(npWhite)
+		} else {
+			ui.Icon(c, iconHeart).Size(18, 18).TextColor(npWhite.Alpha(0.65))
+		}
+	})
+}
+
+func (a *app) npMoreButton(c *ui.Context, t ytmusic.Track) {
+	btn := ui.Box(c.Key("np-more")).Label("更多操作").Size(30, 30).Radius(15).
+		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0).
+		ContextMenu(a.trackCopyMenu(c, t))
+	if btn.Hovered() {
+		btn.Background(ui.RGBA(255, 255, 255, 0.1))
+	}
+	btn.Children(func() {
+		ui.Icon(c, iconMore).Size(18, 18).TextColor(npWhite.Alpha(0.65))
+	})
+}
+
+// npArtists shows who sings what plays, each opening their page.
+func (a *app) npArtists(c *ui.Context, t ytmusic.Track) {
+	if len(t.Artists) == 0 {
+		ui.Text(c, "未知音乐人").FontSize(14).TextColor(npWhite.Alpha(0.5))
+		return
+	}
+	ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
+		for i, ar := range t.Artists {
+			if i > 0 {
+				ui.Text(c, ", ").FontSize(14).TextColor(npWhite.Alpha(0.42))
+			}
+			artist := ar
+			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
+			if artist.ID != "" && strings.HasPrefix(artist.ID, "UC") {
+				r = route{page: pageArtist, id: artist.ID}
+			}
+			link := ui.Row(c.Key(fmt.Sprintf("np-artist-%s-%d", t.ID, i))).
+				Label("正在播放 · " + artist.Name).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+			var label ui.Element
+			link.Children(func() {
+				label = ui.Text(c, artist.Name).FontSize(14).TextColor(npWhite.Alpha(0.55))
+			})
+			if link.Hovered() {
+				label.TextColor(npWhite).Underline()
+			}
+			if link.Clicked() {
+				a.closeNowPlaying()
+				a.open(r)
+			}
+		}
+	})
+}
+
+func (a *app) npScrubber(c *ui.Context) {
+	dur := a.pl.Duration()
+	durSec := dur.Seconds()
+	if durSec <= 0 {
+		durSec = 1
+	}
+	if !a.npScrub.held && !a.npScrub.drag {
+		a.npScrub.v = a.pl.Position().Seconds()
+	}
+	s := ui.SliderBase(c.Key("np-scrub"), &a.npScrub.v, 0, durSec).Height(18).PaddingX(7).
+		Margin(20, 0, 0, 0).FocusRing(false).Label("播放进度").Cursor(ui.CursorPointer)
+	// The press and its release come to the bar wherever the pointer is, and
+	// go on to the slider, which follows it.
+	s.HandleInput(func(ev ui.InputEvent) bool {
+		switch ev.Kind {
+		case ui.InputPointerDown:
+			if ev.Button == 0 {
+				a.npScrub.held = true
+			}
+		case ui.InputPointerUp:
+			a.npScrub.held = false
+		}
+		return false
+	})
+	switch {
+	case a.npScrub.held:
+		a.npScrub.drag = true
+	case a.npScrub.drag:
+		a.npScrub.drag = false
+		a.seekScrub(dur)
+	case s.Changed():
+		a.seekScrub(dur)
+	}
+	hot := s.Hovered() || a.npScrub.held
+	thick := float32(4)
+	if hot {
+		thick = 6
+	}
+	thick = s.AnimateTo("thick", thick, ui.Snappy)
+	knob := float32(0)
+	if hot {
+		knob = 1
+	}
+	knob = s.AnimateTo("knob", knob, ui.Snappy)
+	v := float32(min(1, max(0, a.npScrub.v/durSec)))
+	s.Draw(func(pt *ui.Painter, r ui.Rect) {
+		y := r.Y + (r.H-thick)/2
+		head := r.X + r.W*v
+		pt.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: thick}, npWhite.Alpha(0.18), thick/2)
+		pt.Fill(ui.Rect{X: r.X, Y: y, W: max(thick, head-r.X), H: thick}, npWhite.Alpha(0.92), thick/2)
+		if knob > 0.01 {
+			k := 12 * knob
+			pt.Fill(ui.Rect{X: head - k/2, Y: r.Y + (r.H-k)/2, W: k, H: k}, npWhite, k/2)
+		}
+	})
+}
+
+// seekScrub seeks to where the progress bar is dragged, short of its end,
+// where the track would end as it began.
+func (a *app) seekScrub(dur time.Duration) {
+	if dur <= 0 {
+		return
+	}
+	pos := time.Duration(a.npScrub.v * float64(time.Second))
+	pos = min(max(pos, 0), max(0, dur-time.Second))
+	a.pl.Seek(pos)
+}
+
+func (a *app) npTimes(c *ui.Context) {
+	pos := a.pl.Position()
+	dur := a.pl.Duration()
+	ui.Row(c).FillWidth().Margin(4, 0, 0, 0).Height(16).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, formatTime(pos)).FontSize(11).FontFeatures("tnum").TextColor(npWhite.Alpha(0.5))
+		ui.Spacer(c)
+		rem := "-" + formatTime(max(0, dur-pos))
+		if a.pl.Loading() {
+			rem = "正在缓冲…"
+		}
+		ui.Text(c, rem).FontSize(11).FontFeatures("tnum").TextColor(npWhite.Alpha(0.5))
+	})
+}
+
+func (a *app) npTransport(c *ui.Context) {
+	ui.Row(c).FillWidth().Margin(16, 0, 0, 0).Height(56).AlignItems(ui.Center).Justify(ui.Center).
+		Gap(8).Children(func() {
+		a.npIconButton(c, "np-shuffle", iconShuffle, 18, "随机播放", a.pl.Shuffle(), func() {
+			a.pl.SetShuffle(!a.pl.Shuffle())
+		})
+		a.npIconButton(c, "np-prev", iconPrev, 20, "上一首", false, a.pl.Prev)
+		a.npPlayButton(c)
+		a.npIconButton(c, "np-next", iconNext, 20, "下一首", false, a.pl.Next)
+		icon := iconRepeat
+		if a.pl.Repeat() == player.RepeatOne {
+			icon = iconRepeat1
+		}
+		a.npIconButton(c, "np-repeat", icon, 18, "循环播放", a.pl.Repeat() != player.RepeatOff, a.pl.ToggleRepeat)
+	})
+}
+
+func (a *app) npIconButton(c *ui.Context, key string, icon *ui.SVG, size float32, label string, on bool, onClick func()) {
+	btn := ui.Box(c.Key(key)).Label(label).Size(40, 40).Radius(20).
+		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+	if btn.Hovered() {
+		btn.Background(ui.RGBA(255, 255, 255, 0.08))
+	}
+	if btn.Clicked() {
+		onClick()
+	}
+	col := npWhite.Alpha(0.5)
+	if on {
+		col = npWhite
+	}
+	btn.Children(func() {
+		ui.Icon(c, icon).Size(size, size).TextColor(col)
+	})
+}
+
+func (a *app) npPlayButton(c *ui.Context) {
+	active := a.pl.Active()
+	label := "播放"
+	if active {
+		label = "暂停"
+	}
+	btn := ui.Box(c.Key("np-play")).Label(label).Size(52, 52).Radius(26).Background(npWhite).
+		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
+	if btn.Hovered() {
+		btn.Background(ui.RGBA(255, 255, 255, 0.88))
+	}
+	if btn.Clicked() {
+		a.pl.TogglePlay()
+	}
+	btn.Children(func() {
+		icon := iconPlay
+		if active {
+			icon = iconPause
+		}
+		ui.Icon(c, icon).Size(22, 22).TextColor(npInk)
+	})
+}
+
+func (a *app) npVolume(c *ui.Context) {
+	vol := a.pl.Volume()
+	ui.Row(c).FillWidth().Margin(18, 0, 0, 0).AlignItems(ui.Center).Justify(ui.Center).
+		Gap(8).Children(func() {
+		icon := iconVolume
+		switch {
+		case vol == 0:
+			icon = iconMute
+		case vol < 0.5:
+			icon = iconVolumeLow
+		}
+		mute := ui.Box(c.Key("np-mute")).Label("静音").Size(26, 26).Radius(13).
+			AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+		if mute.Hovered() {
+			mute.Background(ui.RGBA(255, 255, 255, 0.08))
+		}
+		if mute.Clicked() {
+			if vol > 0 {
+				a.pl.SetVolume(0)
+			} else {
+				a.pl.SetVolume(0.8)
+			}
+		}
+		mute.Children(func() {
+			ui.Icon(c, icon).Size(16, 16).TextColor(npWhite.Alpha(0.6))
+		})
+
+		v := vol
+		s := ui.SliderBase(c.Key("np-volume"), &v, 0, 1).Width(124).Height(16).FocusRing(false).Label("音量")
+		if s.Changed() {
+			a.pl.SetVolume(v)
+		}
+		hot := s.Hovered() || s.Pressed()
+		thick := float32(4)
+		if hot {
+			thick = 5
+		}
+		thick = s.AnimateTo("thick", thick, ui.Snappy)
+		fill := float32(v)
+		s.Draw(func(pt *ui.Painter, r ui.Rect) {
+			y := r.Y + (r.H-thick)/2
+			pt.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: thick}, npWhite.Alpha(0.18), thick/2)
+			pt.Fill(ui.Rect{X: r.X, Y: y, W: max(thick, r.W*fill), H: thick}, npWhite.Alpha(0.85), thick/2)
+		})
+	})
+}
+
+// npPaneContent fills the pane beside the cover, as the chosen tab says.
+func (a *app) npPaneContent(c *ui.Context, cur *ytmusic.Track, paneW, paneH float32) {
+	switch a.npPane {
+	case paneQueue:
+		a.npQueuePane(c)
+	case paneRelated:
+		a.npRelatedPane(c, paneW)
+	case paneVideo:
+		a.npVideoPane(c, paneW, paneH)
+	default:
+		a.npLyricsPane(c)
+	}
+}
+
+// npPaneMessage centers a message in place of a pane's content.
+func npPaneMessage(c *ui.Context, title, detail string) {
+	ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
+		ui.Text(c, title).FontSize(18).FontWeight(600).TextColor(npWhite.Alpha(0.7)).TextAlign(ui.Center)
+		if detail != "" {
+			ui.Text(c, detail).FontSize(13).TextColor(npWhite.Alpha(0.35)).TextAlign(ui.Center)
+		}
+	})
+}
+
+func clamp32(v, lo, hi float32) float32 {
+	if hi < lo {
+		return lo
+	}
+	return min(max(v, lo), hi)
 }

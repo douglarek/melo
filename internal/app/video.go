@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/internal/ffmpeg"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -24,29 +26,31 @@ const (
 	videoUA     = "com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip"
 )
 
-var errFFmpegMissing = errors.New("ffmpeg is not installed")
-
 type ffmpegVideoDecoder struct {
-	url    string
-	start  time.Duration
-	cmd    *exec.Cmd
-	stdout io.ReadCloser
-	stderr bytes.Buffer
-	frame  []byte
-	img    *image.RGBA
-	closed bool
+	url       string
+	userAgent string
+	start     time.Duration
+	path      string
+	cmd       *exec.Cmd
+	stdout    io.ReadCloser
+	stderr    bytes.Buffer
+	frame     []byte
+	img       *image.RGBA
+	closed    bool
 }
 
-func newFFmpegVideoDecoder(url string, start time.Duration) (*ffmpegVideoDecoder, error) {
-	path, err := exec.LookPath("ffmpeg")
+func newFFmpegVideoDecoder(url, userAgent string, start time.Duration) (*ffmpegVideoDecoder, error) {
+	path, err := ffmpeg.Resolve(context.Background())
 	if err != nil {
-		return nil, errFFmpegMissing
+		return nil, err
 	}
 	d := &ffmpegVideoDecoder{
-		url:   url,
-		start: start,
-		frame: make([]byte, videoFrameW*videoFrameH*4),
-		img:   image.NewRGBA(image.Rect(0, 0, videoFrameW, videoFrameH)),
+		url:       url,
+		userAgent: userAgent,
+		start:     start,
+		path:      path,
+		frame:     make([]byte, videoFrameW*videoFrameH*4),
+		img:       image.NewRGBA(image.Rect(0, 0, videoFrameW, videoFrameH)),
 	}
 	if err := d.startProcess(path); err != nil {
 		return nil, err
@@ -59,8 +63,8 @@ func (d *ffmpegVideoDecoder) startProcess(path string) error {
 		"-v", "error",
 		"-nostdin",
 	}
-	if strings.HasPrefix(d.url, "http") {
-		args = append(args, "-user_agent", videoUA)
+	if strings.HasPrefix(d.url, "http") && d.userAgent != "" {
+		args = append(args, "-user_agent", d.userAgent)
 	}
 	args = append(args, "-fflags", "nobuffer", "-probesize", "1M", "-analyzeduration", "0")
 	if d.start > 0 {
@@ -109,13 +113,9 @@ func (d *ffmpegVideoDecoder) Next() (ui.VideoFrame, error) {
 
 func (d *ffmpegVideoDecoder) Rewind() error {
 	d.Close()
-	path, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return errFFmpegMissing
-	}
 	d.closed = false
 	d.start = 0
-	return d.startProcess(path)
+	return d.startProcess(d.path)
 }
 
 func (d *ffmpegVideoDecoder) Close() error {
@@ -146,6 +146,7 @@ func (a *app) resetVideoForTrack(cur *ytmusic.Track) {
 	}
 	a.lastPlayedTrackID = id
 	a.npVideoMode = false
+	a.npVideoKick = ""
 	a.closeVideo()
 }
 
@@ -217,20 +218,24 @@ func (a *app) ensureVideo(c *ui.Context) {
 	}
 
 	info := a.pl.StreamInfo()
-	if info == nil && a.pl.PendingPlay() {
+	if info == nil {
+		if a.pl.Loading() || a.pl.PendingPlay() {
+			return // the pane shows its spinner
+		}
+		// Nothing has resolved the stream, as when a restart restores the
+		// queue: start it, as the video needs a stream as much as the
+		// speakers do.
+		if a.npVideoKick != cur.ID {
+			a.npVideoKick = cur.ID
+			a.pl.Play()
+		}
 		return
 	}
-	if info == nil || info.DirectURL == "" || info.Format != "mp4" {
-		c.Toast("当前视频无法解码，继续以音频播放")
-		a.npVideoMode = false
-		c.Invalidate()
-		return
-	}
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		c.Toast("未安装 ffmpeg，无法观看音乐视频。请安装 ffmpeg 后切换视频。")
-		a.npVideoMode = false
-		c.Invalidate()
-		return
+	// The stream chosen for the speakers carries a picture when it is a
+	// progressive one; when it is not, one is resolved for the pane alone.
+	source, userAgent := "", videoUA
+	if info.HasVideo && info.DirectURL != "" {
+		source = a.videoSource(info)
 	}
 
 	a.closeVideo()
@@ -238,21 +243,40 @@ func (a *app) ensureVideo(c *ui.Context) {
 	a.npVideoSeq++
 	seq := a.npVideoSeq
 	curID := cur.ID
-	source := a.videoSource(info)
 	start := a.pl.Position()
 	a.npVideoTrack = curID
 
 	go func() {
-		dec, err := newFFmpegVideoDecoder(source, start)
+		url, ua := source, userAgent
+		if url == "" {
+			vs, err := ytmusic.DefaultClient.ResolveVideo(context.Background(), curID)
+			if err != nil {
+				a.post(func() {
+					if seq != a.npVideoSeq {
+						return
+					}
+					a.npVideoStarting = false
+					a.npVideoMode = false
+					c.Toast("当前视频无法解码，继续以音频播放")
+					c.Invalidate()
+				})
+				return
+			}
+			url, ua = vs.URL, vs.UserAgent
+		}
+		dec, err := newFFmpegVideoDecoder(url, ua, start)
 		if err != nil {
-			dec = nil
 			a.post(func() {
 				if seq != a.npVideoSeq {
 					return
 				}
 				a.npVideoStarting = false
 				a.npVideoMode = false
-				c.Toast("视频加载失败，继续以音频播放")
+				if errors.Is(err, ffmpeg.ErrNotFound) {
+					c.Toast("未找到 ffmpeg，无法观看音乐视频。macOS 可用 brew install ffmpeg 安装，或用 MELO_FFMPEG 指定可执行文件路径。")
+				} else {
+					c.Toast("视频加载失败，继续以音频播放")
+				}
 				c.Invalidate()
 			})
 			return

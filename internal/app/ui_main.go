@@ -20,6 +20,7 @@ func sidebarTopInset(bar ui.TitleBar) float32 {
 }
 
 func (a *app) view(c *ui.Context) {
+	a.syncNowPlayingWindowButtons()
 	t := *c.Theme()
 	a.pal = paletteFor(&t)
 	p := a.pal
@@ -80,9 +81,7 @@ func (a *app) view(c *ui.Context) {
 		})
 
 		// Modal overlays
-		if a.nowPlayingOpen {
-			a.nowPlayingView(c)
-		}
+		a.nowPlayingLayer(c)
 		if a.accountModalOpen {
 			a.accountModalView(c)
 		}
