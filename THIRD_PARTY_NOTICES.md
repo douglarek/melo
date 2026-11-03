@@ -18,6 +18,7 @@ components and where their license texts can be found.
 | `golang.org/x/sys` | v0.49.0 | BSD-3-Clause | Copyright 2009 The Go Authors |
 | `golang.org/x/text` | v0.43.0 | BSD-3-Clause | Copyright 2009 The Go Authors |
 | `github.com/go-text/typesetting` | v0.3.5 | BSD-3-Clause or Unlicense | Melo relies on the BSD-3-Clause option |
+| BgUtils (`internal/app/bgutils.js`) | MIT | Copyright (c) 2024 LuanRT; bundled build of [BgUtils](https://github.com/LuanRT/BgUtils) |
 
 Full texts:
 

@@ -35,6 +35,8 @@ type Client struct {
 	language   string
 	region     string
 	cookie     string
+	sabrTokens POTProvider
+	sabrDir    string
 }
 
 // DefaultClient is the package-level client.

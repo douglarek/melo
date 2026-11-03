@@ -254,12 +254,16 @@ type StreamSegment struct {
 type StreamInfo struct {
 	VideoID       string
 	DirectURL     string
-	Format        string // "mp4", "hls"
+	Format        string // "mp4", "hls", "file"
 	SampleRate    int
 	Channels      int
 	DurationMs    int64
 	ContentLength int64
-	HEAAC         bool
+	// LocalPath is a downloaded file to play instead of a URL, and Sabr
+	// downloads it while it plays.
+	LocalPath string
+	Sabr      *SabrSession
+	HEAAC     bool
 	// HasVideo says the stream carries a picture as well as sound.
 	HasVideo    bool
 	HLSPlaylist string

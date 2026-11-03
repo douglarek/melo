@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Melo PO</title></head>
+<body>
+<script>var module = { exports: {} }; var exports = module.exports;</script>
+<script src="bgutils.js"></script>
+<script>
+(() => {
+  const KEY = 'O43z0dpjhgX20SCx4KAo';
+  const { BG, buildURL, getHeaders } = module.exports;
+
+  async function potFetch(url, opts = {}) {
+    if (!window.mygo || !window.mygo.call) throw new Error('no Pot bridge');
+    const r = await window.mygo.call('Pot.Fetch', {
+      url: String(url),
+      method: opts.method || 'GET',
+      headers: opts.headers || {},
+      body: opts.body || '',
+    });
+    return {
+      ok: r.ok,
+      status: r.status,
+      json: async () => JSON.parse(r.body),
+      text: async () => r.body,
+    };
+  }
+
+  window.mintPoToken = async (binding) => {
+    const bgConfig = { fetch: potFetch, globalObj: window, identifier: binding, requestKey: KEY, useYouTubeAPI: true };
+    const challenge = await BG.Challenge.create(bgConfig);
+    if (!challenge) throw new Error('no challenge');
+    const interpreter = challenge.interpreterJavascript &&
+      challenge.interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
+    if (!interpreter) throw new Error('no interpreter');
+    new Function(interpreter)();
+    const result = await BG.PoToken.generate({ program: challenge.program, bgConfig, globalName: challenge.globalName });
+    if (!result || !result.poToken) throw new Error('no po token');
+    return result.poToken;
+  };
+  window.potReady = true;
+})();
+</script>
+</body>
+</html>

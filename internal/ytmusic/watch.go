@@ -526,7 +526,13 @@ func (c *Client) iosPlayer(ctx context.Context, videoID string) (map[string]any,
 
 // ResolveStream resolves the sound to play: the ANDROID client's, which is
 // reliable and progressive when it has it, or else the HLS one iOS serves.
+// ResolveStream resolves the sound to play: a SABR download (AAC 128 kbps)
+// when it is configured and works, else the ANDROID client's stream, which
+// is reliable and progressive when it has it, or else the HLS one iOS serves.
 func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo, error) {
+	if info, err := c.resolveSabrFile(ctx, videoID); err == nil {
+		return info, nil
+	}
 	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
 		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
 			if f := pickAndroidAudio(sd); f != nil {

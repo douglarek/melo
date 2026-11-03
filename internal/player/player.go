@@ -509,6 +509,20 @@ func (p *Player) playCurrent() {
 
 		var st stream
 		switch {
+		case info.Sabr != nil:
+			st, err = openSabrPure(info.Sabr, info)
+			if err != nil {
+				waitCtx, waitCancel := context.WithTimeout(ctx, sabrWaitTimeout)
+				werr := info.Sabr.Wait(waitCtx)
+				waitCancel()
+				if werr != nil {
+					err = werr
+				} else {
+					st, err = openSabrStream(info.Sabr)
+				}
+			}
+		case info.LocalPath != "":
+			st, err = openMP4Stream(info.LocalPath)
 		case info.HEAAC:
 			st, err = openHEAACStream(ctx, info, p.Cache)
 		case info.Format == "mp4" && info.DirectURL != "":

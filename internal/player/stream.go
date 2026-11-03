@@ -487,6 +487,7 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 type mp4Stream struct {
 	mu          sync.Mutex
 	file        *os.File
+	closer      io.Closer
 	dec         *aacm4a.Decoder
 	sampleRate  int
 	channels    int
@@ -501,9 +502,17 @@ func openMP4Stream(filePath string) (*mp4Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	dec, info, err := aacm4a.NewSeekableDecoder(f)
+	return newMP4Stream(f, f)
+}
+
+func openSabrStream(sess *ytmusic.SabrSession) (*mp4Stream, error) {
+	return newMP4Stream(sess, sess)
+}
+
+func newMP4Stream(r io.ReadSeeker, closer io.Closer) (*mp4Stream, error) {
+	dec, info, err := aacm4a.NewSeekableDecoder(r)
 	if err != nil {
-		f.Close()
+		closer.Close()
 		return nil, err
 	}
 	sr := info.SampleRate
@@ -517,7 +526,7 @@ func openMP4Stream(filePath string) (*mp4Stream, error) {
 	totalFrames := int64(info.Duration.Seconds() * float64(sr))
 
 	return &mp4Stream{
-		file:        f,
+		closer:      closer,
 		dec:         dec,
 		sampleRate:  sr,
 		channels:    ch,
@@ -608,6 +617,11 @@ func (s *mp4Stream) Close() error {
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
+	}
+	if s.closer != nil {
+		err := s.closer.Close()
+		s.closer = nil
+		return err
 	}
 	if s.file != nil {
 		err := s.file.Close()

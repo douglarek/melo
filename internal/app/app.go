@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -87,6 +88,7 @@ type app struct {
 	// Application lifetime
 	ctx    context.Context
 	cancel context.CancelFunc
+	pot    *potProvider
 
 	// Settings modal
 	settingsModalOpen bool
@@ -178,6 +180,7 @@ func (a *app) post(fn func()) {
 
 // Run boots the application and launches the main window.
 func Run() error {
+	mygo.Bind(&Pot{client: &http.Client{Timeout: 30 * time.Second}})
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{
 		ctx:         ctx,
@@ -222,6 +225,9 @@ func Run() error {
 		}
 
 		a.art = newArtCache(a.post, filepath.Join(cacheDir, "artwork"))
+		a.pot = newPOTProvider()
+		a.pot.start()
+		ytmusic.DefaultClient.SetSabr(a.pot, filepath.Join(cacheDir, "sabr"))
 		a.pl = player.New(a.post)
 		a.pl.SetContext(a.ctx)
 		a.pl.Cache = songCache
@@ -264,6 +270,10 @@ func Run() error {
 				e.PreventDefault()
 				a.win.Hide()
 				a.releaseMemorySoon()
+				return
+			}
+			if a.pot != nil {
+				a.pot.close()
 			}
 		})
 		mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
@@ -278,6 +288,9 @@ func Run() error {
 			}
 			if a.tray != nil {
 				a.tray.Destroy()
+			}
+			if a.pot != nil {
+				a.pot.close()
 			}
 			mygo.NowPlaying.Clear()
 			a.savePlayerSession()
