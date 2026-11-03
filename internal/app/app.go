@@ -270,6 +270,13 @@ func Run() error {
 		mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 			a.quitting = true
 		})
+		mygo.App.OnActivate(func(hasVisibleWindows bool) {
+			if a.win == nil || hasVisibleWindows {
+				return
+			}
+			a.win.Show()
+			a.win.Focus()
+		})
 		mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 			if a.cancel != nil {
 				a.cancel()
