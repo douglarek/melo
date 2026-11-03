@@ -331,11 +331,7 @@ func (a *app) npLyricsBadges(c *ui.Context) {
 func (a *app) npTabButton(c *ui.Context, pane paneKind) {
 	label := npPaneLabel(pane)
 	active := a.npPane == pane
-	left := float32(14)
-	if pane == paneLyrics {
-		left = 0
-	}
-	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14, 6, left).Radius(999).
+	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14).Radius(999).
 		FocusRing(false).Label(label).Cursor(ui.CursorPointer).Gap(6)
 	bg := ui.Transparent
 	fg := npWhite.Alpha(0.55)
