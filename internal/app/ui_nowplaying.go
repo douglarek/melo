@@ -30,6 +30,8 @@ const (
 	npBottomPadding = 24
 	// npPaneInset is the room between the pane's left edge and its rows.
 	npPaneInset = 10
+	// npResize is how long the cover and panes take to follow a window resize.
+	npResize = 160 * time.Millisecond
 	// npSideBlock is how tall everything under the cover is.
 	npSideBlock = 262
 )
@@ -287,6 +289,7 @@ func (a *app) npTopBar(c *ui.Context) {
 
 func (a *app) npTabs(c *ui.Context) {
 	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, 0, 0, npPaneInset).
+		Transition(ui.ElementTransition{Position: true, Size: true, Duration: npResize}).
 		AlignItems(ui.Center).Gap(4).Children(func() {
 		for _, pane := range a.npPanes() {
 			a.npTabButton(c, pane)
@@ -391,7 +394,8 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 
 	ui.Row(c.Key("np-body")).Grow(1).FillWidth().Padding(0, m.inset, npBottomPadding, m.inset).
 		Gap(npSideGap).AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c.Key("np-side")).Width(m.sideW).FillHeight().Justify(ui.Center).Children(func() {
+		ui.Column(c.Key("np-side")).Width(m.sideW).FillHeight().Justify(ui.Center).
+			Transition(ui.ElementTransition{Position: true, Size: true, Duration: npResize}).Children(func() {
 			a.npCover(c, cur, m.cover)
 			a.npInfo(c, cur)
 			a.npScrubber(c)
@@ -400,7 +404,8 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 			a.npVolume(c)
 		})
 
-		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().Children(func() {
+		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().
+			Transition(ui.ElementTransition{Position: true, Size: true, Duration: npResize}).Children(func() {
 			if m.paneTop > 0 {
 				ui.Box(c).Height(m.paneTop)
 			}
@@ -411,7 +416,8 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 }
 
 func (a *app) npCover(c *ui.Context, cur *ytmusic.Track, size float32) {
-	box := ui.Box(c.Key("np-cover")).Size(size, size).Radius(12).Cursor(ui.CursorPointer)
+	box := ui.Box(c.Key("np-cover")).Size(size, size).Radius(12).Cursor(ui.CursorPointer).
+		Transition(ui.ElementTransition{Position: true, Size: true, Duration: npResize})
 	// The cover breathes as music plays, and settles as it pauses.
 	scale := float32(1)
 	if !a.pl.Playing() {
