@@ -490,12 +490,29 @@ func (a *app) npMoreButton(c *ui.Context, t ytmusic.Track) {
 
 // npArtists shows who sings what plays, each opening their page.
 func (a *app) npArtists(c *ui.Context, t ytmusic.Track) {
-	if len(t.Artists) == 0 {
-		ui.Text(c, "未知音乐人").FontSize(14).TextColor(npWhite.Alpha(0.5))
-		return
+	artists := make([]ytmusic.ArtistRef, 0, len(t.Artists))
+	isVideo := t.Video
+	for _, ar := range t.Artists {
+		if ytmusic.VideoByline(ar.Name) {
+			isVideo = true
+		}
+		ar.Name = ytmusic.CleanArtistName(ar.Name)
+		if ar.Name != "" {
+			artists = append(artists, ar)
+		}
 	}
 	ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
-		for i, ar := range t.Artists {
+		if isVideo {
+			ui.Box(c.Key("np-video-badge")).Padding(2, 7).Margin(0, 8, 0, 0).Radius(4).
+				Background(ui.RGBA(255, 255, 255, 0.1)).Children(func() {
+				ui.Text(c, "音乐视频").FontSize(10.5).TextColor(npWhite.Alpha(0.6))
+			})
+		}
+		if len(artists) == 0 {
+			ui.Text(c, "未知音乐人").FontSize(14).TextColor(npWhite.Alpha(0.5))
+			return
+		}
+		for i, ar := range artists {
 			if i > 0 {
 				ui.Text(c, ", ").FontSize(14).TextColor(npWhite.Alpha(0.42))
 			}

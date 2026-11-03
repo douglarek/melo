@@ -104,9 +104,23 @@ func (t Track) ArtistNames() string {
 	}
 	names := make([]string, len(t.Artists))
 	for i, a := range t.Artists {
-		names[i] = a.Name
+		names[i] = CleanArtistName(a.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+// CleanArtistName returns the channel part of a byline, dropping video
+// metadata such as the view count.
+func CleanArtistName(name string) string {
+	if i := strings.IndexAny(name, "•·"); i > 0 {
+		name = name[:i]
+	}
+	return strings.TrimSpace(name)
+}
+
+// VideoByline reports whether a byline carries a video's view count.
+func VideoByline(name string) bool {
+	return strings.Contains(name, "次观看") || strings.Contains(name, "次播放")
 }
 
 // DurationString returns the track duration formatted as mm:ss.

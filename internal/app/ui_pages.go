@@ -1111,16 +1111,22 @@ func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color)
 			ui.Text(c, "未知音乐人").FontSize(12).TextColor(color)
 			return
 		}
-		for i, ar := range t.Artists {
-			if i > 0 {
+		n := 0
+		for _, ar := range t.Artists {
+			artist := ar
+			artist.Name = ytmusic.CleanArtistName(artist.Name)
+			if artist.Name == "" {
+				continue
+			}
+			if n > 0 {
 				ui.Text(c, ", ").FontSize(12).TextColor(color)
 			}
-			artist := ar
 			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
 			if artist.ID != "" && strings.HasPrefix(artist.ID, "UC") {
 				r = route{page: pageArtist, id: artist.ID}
 			}
-			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", t.ID, i)), artist.Name, color, hover, r)
+			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", t.ID, n)), artist.Name, color, hover, r)
+			n++
 		}
 	})
 }
