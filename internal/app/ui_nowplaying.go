@@ -28,9 +28,8 @@ const (
 	npSideGap = 52
 	// npBottomPadding keeps the pane clear of the window's foot.
 	npBottomPadding = 24
-	// npSideBlock is how tall everything under the cover is, which the
-	// pane's first line is aligned with the cover's top by.
-	npSideBlock = 262
+	// npPaneInset is the room between the pane's left edge and its rows.
+	npPaneInset = 10
 )
 
 var (
@@ -287,7 +286,7 @@ func (a *app) npTopBar(c *ui.Context) {
 
 func (a *app) npTabs(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 	m := npMetrics(w, h)
-	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, m.inset, 0, m.paneX).
+	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, m.inset, 0, m.paneX+npPaneInset).
 		AlignItems(ui.Center).Gap(4).Children(func() {
 		for _, pane := range a.npPanes() {
 			a.npTabButton(c, pane)
@@ -332,7 +331,11 @@ func (a *app) npLyricsBadges(c *ui.Context) {
 func (a *app) npTabButton(c *ui.Context, pane paneKind) {
 	label := npPaneLabel(pane)
 	active := a.npPane == pane
-	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14).Radius(999).
+	left := float32(14)
+	if pane == paneLyrics {
+		left = 0
+	}
+	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14, 6, left).Radius(999).
 		FocusRing(false).Label(label).Cursor(ui.CursorPointer).Gap(6)
 	bg := ui.Transparent
 	fg := npWhite.Alpha(0.55)

@@ -229,7 +229,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 	}
 
 	ui.Scroll(c.Key("np-related-scroll")).Vertical().TrackScroll(&a.npRelatedScroll).Fill().Children(func() {
-		ui.Column(c).FillWidth().Gap(28).Padding(0, 0, 24, 0).Children(func() {
+		ui.Column(c).FillWidth().Gap(28).Padding(0, 0, 24, npPaneInset).Children(func() {
 			if trackShelf != nil {
 				var tracks []ytmusic.Track
 				for _, item := range trackShelf.Items {
