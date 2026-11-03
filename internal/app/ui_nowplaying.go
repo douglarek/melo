@@ -411,16 +411,24 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 }
 
 func (a *app) npCover(c *ui.Context, cur *ytmusic.Track, size float32) {
-	box := ui.Box(c.Key("np-cover")).Size(size, size).Radius(12).
-		Shadow(0, 26, 52, -18, ui.RGBA(0, 0, 0, 0.7)).Cursor(ui.CursorPointer)
+	box := ui.Box(c.Key("np-cover")).Size(size, size).Radius(12).Cursor(ui.CursorPointer)
 	// The cover breathes as music plays, and settles as it pauses.
 	scale := float32(1)
 	if !a.pl.Playing() {
 		scale = 0.965
 	}
-	box.AnimatePose(ui.Pose{Scale: scale}, ui.Animation{Spring: ui.SpringOptions{
-		Duration: 650 * time.Millisecond, Bounce: 0.12,
-	}})
+	pose := ui.Pose{Scale: scale}
+	anim := ui.Animation{Spring: ui.SpringOptions{Duration: 650 * time.Millisecond, Bounce: 0.12}}
+	shadowY, shadowBlur := float32(26), float32(52)
+	if x, _, over := box.PointerPosition(); over {
+		scale += 0.035
+		pose = ui.Pose{Scale: scale, Y: -5, Rotate: max(-2, min(2, (x/size-0.5)*4))}
+		anim = ui.Animation{Spring: ui.SpringOptions{Duration: 220 * time.Millisecond, Bounce: 0.06}}
+		shadowY, shadowBlur = 34, 64
+		c.After(16 * time.Millisecond)
+	}
+	box.Shadow(0, shadowY, shadowBlur, -18, ui.RGBA(0, 0, 0, 0.7))
+	box.AnimatePose(pose, anim)
 	if box.Clicked() {
 		a.pl.TogglePlay()
 	}
