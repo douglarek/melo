@@ -152,6 +152,9 @@ type app struct {
 	npTargetY         float32
 	npCurrentY        float32
 	npButtonTheme     mygo.ThemeSource
+	mediaTrackID      string
+	mediaArtwork      string
+	mediaDuration     time.Duration
 	npVideoMode       bool
 	npVideoStarting   bool
 	npVideoSeq        int
@@ -228,6 +231,7 @@ func Run() error {
 				a.resetVideoForTrack(cur)
 				a.maybeNotifyTrack(cur)
 				a.syncNowPlayingLyrics()
+				a.publishNowPlaying()
 			})
 			a.scheduleSavePlayerSession()
 		}
@@ -253,6 +257,7 @@ func Run() error {
 		})
 
 		a.setMenu()
+		a.setupMediaKeys()
 		a.setupTray()
 		a.win.OnClose(func(e *mygo.CloseEvent) {
 			if a.settings.CloseToTray && a.tray != nil && !a.quitting {
@@ -274,6 +279,7 @@ func Run() error {
 			if a.tray != nil {
 				a.tray.Destroy()
 			}
+			mygo.NowPlaying.Clear()
 			a.savePlayerSession()
 			if a.pl != nil && a.pl.Cache != nil && a.pl.Cache.Limit() == 0 {
 				a.pl.Cache.Clear()

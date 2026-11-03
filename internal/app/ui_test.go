@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/douglarek/melo/internal/player"
@@ -1380,6 +1381,56 @@ func TestNowPlayingCloseAnimates(t *testing.T) {
 	}
 	if a.npOpen {
 		t.Fatal("the view is still open after closing")
+	}
+}
+
+func TestNowPlayingShowsMediaInfo(t *testing.T) {
+	a := newTestApp(t)
+	track := ytmusic.Track{
+		ID:         "track1",
+		Title:      "晴天",
+		Artists:    []ytmusic.ArtistRef{{Name: "周杰伦"}},
+		Album:      ytmusic.AlbumRef{Name: "叶惠美"},
+		DurationMs: 269000,
+	}
+	a.pl.SetQueue([]ytmusic.Track{track}, 0)
+	a.publishNowPlaying()
+
+	info, ok := mygo.NowPlaying.Info()
+	if !ok {
+		t.Fatal("the system shows nothing for the track playing")
+	}
+	if info.Title != "晴天" || info.Artist != "周杰伦" || info.Album != "叶惠美" {
+		t.Fatalf("info = %q / %q / %q", info.Title, info.Artist, info.Album)
+	}
+	if info.Duration != 269*time.Second {
+		t.Fatalf("duration = %v, want 4m29s", info.Duration)
+	}
+	if info.State != mygo.PlaybackPaused {
+		t.Fatalf("state = %v, want paused", info.State)
+	}
+	if info.Commands&mygo.MediaPlay == 0 || info.Commands&mygo.MediaNext == 0 || info.Commands&mygo.MediaSeek == 0 {
+		t.Fatalf("commands = %v, want play, next and seek", info.Commands)
+	}
+}
+
+func TestMediaKeysDriveThePlayer(t *testing.T) {
+	a := newTestApp(t)
+	t1 := ytmusic.Track{ID: "track1", Title: "晴天", DurationMs: 269000}
+	t2 := ytmusic.Track{ID: "track2", Title: "七里香", DurationMs: 299000}
+	a.pl.SetQueue([]ytmusic.Track{t1, t2}, 0)
+
+	a.handleMediaCommand(mygo.MediaNext, 0)
+	if cur := a.pl.Current(); cur == nil || cur.ID != "track2" {
+		t.Fatalf("next played %+v, want track2", cur)
+	}
+	a.handleMediaCommand(mygo.MediaPrevious, 0)
+	if cur := a.pl.Current(); cur == nil || cur.ID != "track1" {
+		t.Fatalf("previous played %+v, want track1", cur)
+	}
+	a.handleMediaCommand(mygo.MediaSeek, 42*time.Second)
+	if got := a.pl.Position(); got != 42*time.Second {
+		t.Fatalf("seek moved to %v, want 42s", got)
 	}
 }
 

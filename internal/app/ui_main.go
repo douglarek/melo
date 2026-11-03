@@ -21,6 +21,7 @@ func sidebarTopInset(bar ui.TitleBar) float32 {
 
 func (a *app) view(c *ui.Context) {
 	a.syncNowPlayingWindowButtons()
+	a.syncMediaArtwork()
 	t := *c.Theme()
 	a.pal = paletteFor(&t)
 	p := a.pal
