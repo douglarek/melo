@@ -30,6 +30,8 @@ const (
 	npBottomPadding = 24
 	// npPaneInset is the room between the pane's left edge and its rows.
 	npPaneInset = 10
+	// npSideBlock is how tall everything under the cover is.
+	npSideBlock = 262
 )
 
 var (
@@ -226,7 +228,6 @@ func (a *app) nowPlayingView(c *ui.Context) {
 		a.npBackdrop(c, tint, w)
 		ui.Column(c).Fill().Children(func() {
 			a.npTopBar(c)
-			a.npTabs(c, cur, w, h)
 			a.npBody(c, cur, w, h)
 		})
 	})
@@ -284,9 +285,8 @@ func (a *app) npTopBar(c *ui.Context) {
 	})
 }
 
-func (a *app) npTabs(c *ui.Context, cur *ytmusic.Track, w, h float32) {
-	m := npMetrics(w, h)
-	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, m.inset, 0, m.paneX+npPaneInset).
+func (a *app) npTabs(c *ui.Context) {
+	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, 0, 0, npPaneInset).
 		AlignItems(ui.Center).Gap(4).Children(func() {
 		for _, pane := range a.npPanes() {
 			a.npTabButton(c, pane)
@@ -359,12 +359,13 @@ func (a *app) npTabButton(c *ui.Context, pane paneKind) {
 
 // npLayout is where the cover and the pane beside it lie in a window w×h.
 type npLayout struct {
-	inset float32
-	sideW float32
-	cover float32
-	paneX float32
-	paneW float32
-	rowH  float32
+	inset   float32
+	sideW   float32
+	cover   float32
+	paneX   float32
+	paneW   float32
+	rowH    float32
+	paneTop float32
 }
 
 func npMetrics(w, h float32) npLayout {
@@ -372,15 +373,16 @@ func npMetrics(w, h float32) npLayout {
 	sideW := npSideWidth(w)
 	cover := min(sideW, max(160, h*0.40))
 	sideW = max(cover, 264)
-	rowH := h - npTopBarHeight - npTabsHeight - npBottomPadding
+	rowH := h - npTopBarHeight - npBottomPadding
 	paneX := inset + sideW + npSideGap
 	return npLayout{
-		inset: inset,
-		sideW: sideW,
-		cover: cover,
-		paneX: paneX,
-		paneW: w - inset - paneX,
-		rowH:  rowH,
+		inset:   inset,
+		sideW:   sideW,
+		cover:   cover,
+		paneX:   paneX,
+		paneW:   w - inset - paneX,
+		rowH:    rowH,
+		paneTop: max(0, (rowH-cover-npSideBlock)/2),
 	}
 }
 
@@ -399,7 +401,11 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 		})
 
 		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().Children(func() {
-			a.npPaneContent(c, cur, m.paneW, m.rowH)
+			if m.paneTop > 0 {
+				ui.Box(c).Height(m.paneTop)
+			}
+			a.npTabs(c)
+			a.npPaneContent(c, cur, m.paneW, m.rowH-m.paneTop-npTabsHeight)
 		})
 	})
 }
