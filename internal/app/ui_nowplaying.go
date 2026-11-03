@@ -360,13 +360,12 @@ func (a *app) npTabButton(c *ui.Context, pane paneKind) {
 
 // npLayout is where the cover and the pane beside it lie in a window w×h.
 type npLayout struct {
-	inset   float32
-	sideW   float32
-	cover   float32
-	paneX   float32
-	paneW   float32
-	rowH    float32
-	paneTop float32
+	inset float32
+	sideW float32
+	cover float32
+	paneX float32
+	paneW float32
+	rowH  float32
 }
 
 func npMetrics(w, h float32) npLayout {
@@ -377,13 +376,12 @@ func npMetrics(w, h float32) npLayout {
 	rowH := h - npTopBarHeight - npTabsHeight - npBottomPadding
 	paneX := inset + sideW + npSideGap
 	return npLayout{
-		inset:   inset,
-		sideW:   sideW,
-		cover:   cover,
-		paneX:   paneX,
-		paneW:   w - inset - paneX,
-		rowH:    rowH,
-		paneTop: max(0, (rowH-cover-npSideBlock)/2),
+		inset: inset,
+		sideW: sideW,
+		cover: cover,
+		paneX: paneX,
+		paneW: w - inset - paneX,
+		rowH:  rowH,
 	}
 }
 
@@ -402,12 +400,7 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 		})
 
 		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().Children(func() {
-			paneH := m.rowH
-			if m.paneTop > 0 {
-				ui.Box(c).Height(m.paneTop)
-				paneH -= m.paneTop
-			}
-			a.npPaneContent(c, cur, m.paneW, paneH)
+			a.npPaneContent(c, cur, m.paneW, m.rowH)
 		})
 	})
 }
