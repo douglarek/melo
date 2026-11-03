@@ -628,7 +628,7 @@ func (a *app) npTimes(c *ui.Context) {
 
 func (a *app) npTransport(c *ui.Context) {
 	ui.Row(c).FillWidth().Margin(16, 0, 0, 0).Height(56).AlignItems(ui.Center).Justify(ui.Center).
-		Gap(8).Children(func() {
+		Gap(10).Children(func() {
 		a.npIconButton(c, "np-shuffle", iconShuffle, 18, "随机播放", a.pl.Shuffle(), func() {
 			a.pl.SetShuffle(!a.pl.Shuffle())
 		})
@@ -652,7 +652,7 @@ func (a *app) npIconButton(c *ui.Context, key string, icon *ui.SVG, size float32
 	if btn.Clicked() {
 		onClick()
 	}
-	col := npWhite.Alpha(0.5)
+	col := npWhite.Alpha(0.6)
 	if on {
 		col = npWhite
 	}
@@ -667,10 +667,10 @@ func (a *app) npPlayButton(c *ui.Context) {
 	if active {
 		label = "暂停"
 	}
-	btn := ui.Box(c.Key("np-play")).Label(label).Size(52, 52).Radius(26).Background(npWhite).
+	btn := ui.Box(c.Key("np-play")).Label(label).Size(56, 56).Radius(28).
 		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
 	if btn.Hovered() {
-		btn.Background(ui.RGBA(255, 255, 255, 0.88))
+		btn.Background(ui.RGBA(255, 255, 255, 0.08))
 	}
 	if btn.Clicked() {
 		a.pl.TogglePlay()
@@ -680,7 +680,7 @@ func (a *app) npPlayButton(c *ui.Context) {
 		if active {
 			icon = iconPause
 		}
-		ui.Icon(c, icon).Size(22, 22).TextColor(npInk)
+		ui.Icon(c, icon).Size(36, 36).TextColor(npWhite)
 	})
 }
 
