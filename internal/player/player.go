@@ -40,8 +40,10 @@ type Player struct {
 	// DurationResolved reports a duration learned from the resolved stream
 	// when the queue entry did not carry one.
 	DurationResolved func(videoID string, durationMs int64)
-	Cache            *Cache
-	Resolve          func(ctx context.Context, id string) (*ytmusic.StreamInfo, error)
+	// Error reports a stream that could not be resolved, on the UI thread.
+	Error   func(videoID string, err error)
+	Cache   *Cache
+	Resolve func(ctx context.Context, id string) (*ytmusic.StreamInfo, error)
 
 	ctx     context.Context
 	loadWG  sync.WaitGroup
@@ -490,6 +492,9 @@ func (p *Player) playCurrent() {
 				p.resumeAt = p.pauseOffset
 				p.resumeID = track.ID
 				p.mu.Unlock()
+				if p.Error != nil {
+					p.Error(track.ID, err)
+				}
 				p.changed()
 			})
 			return
@@ -561,6 +566,9 @@ func (p *Player) playCurrent() {
 				p.resumeAt = p.pauseOffset
 				p.resumeID = track.ID
 				p.mu.Unlock()
+				if p.Error != nil {
+					p.Error(track.ID, err)
+				}
 				p.changed()
 			})
 			return

@@ -95,6 +95,10 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.authErr)
 		a.authErr = ""
 	}
+	if a.playbackErr != "" {
+		c.Toast(a.playbackErr)
+		a.playbackErr = ""
+	}
 }
 
 func (a *app) sidebar(c *ui.Context) {

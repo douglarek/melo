@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -78,6 +79,7 @@ type app struct {
 	authMu           sync.Mutex
 	authAttempt      uint64
 	authErr          string
+	playbackErr      string
 
 	// Persistence
 	saveMu    sync.Mutex
@@ -231,6 +233,10 @@ func Run() error {
 				a.publishNowPlaying()
 			})
 			a.scheduleSavePlayerSession()
+		}
+		a.pl.Error = func(id string, err error) {
+			log.Printf("playback %s: %v", id, err)
+			a.playbackErr = "这首歌曲暂时无法播放"
 		}
 		a.pl.DurationResolved = func(id string, durationMs int64) {
 			a.post(func() {
