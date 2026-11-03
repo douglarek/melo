@@ -2,14 +2,12 @@ package player
 
 import (
 	"context"
-	"errors"
 	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/egoist/mygo/audio"
-	aacpcm "github.com/tphakala/go-aac/pcm"
 
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -523,8 +521,6 @@ func (p *Player) playCurrent() {
 			}
 		case info.LocalPath != "":
 			st, err = openMP4Stream(info.LocalPath)
-		case info.HEAAC:
-			st, err = openHEAACStream(ctx, info, p.Cache)
 		case info.Format == "mp4" && info.DirectURL != "":
 			cachePath := p.Cache.Path(info.VideoID, "mp4")
 			durMs := track.DurationMs
@@ -532,9 +528,6 @@ func (p *Player) playCurrent() {
 				durMs = info.DurationMs
 			}
 			st, err = openStreamingMP4(ctx, info.DirectURL, cachePath, durMs, info.ContentLength, resumeAt)
-			if err != nil && (errors.Is(err, aacpcm.ErrUnsupportedSBR) || errors.Is(err, aacpcm.ErrUnsupportedPS)) {
-				st, err = openHEAACStream(ctx, info, p.Cache)
-			}
 		default:
 			st, err = openHLSStream(ctx, info, p.Cache)
 		}

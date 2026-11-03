@@ -5,6 +5,12 @@ Melo is licensed under the GNU Affero General Public License, version 3
 source or binaries remain under their own licenses. This file lists those
 components and where their license texts can be found.
 
+## Bundled JavaScript
+
+| Component | License | Copyright / notes |
+| --- | --- | --- |
+| BgUtils (`internal/app/bgutils.js`) | MIT | Copyright (c) 2024 LuanRT; bundled build of [BgUtils](https://github.com/LuanRT/BgUtils) |
+
 ## Linked components
 
 | Component | Version | License | Copyright / notes |
@@ -18,7 +24,6 @@ components and where their license texts can be found.
 | `golang.org/x/sys` | v0.49.0 | BSD-3-Clause | Copyright 2009 The Go Authors |
 | `golang.org/x/text` | v0.43.0 | BSD-3-Clause | Copyright 2009 The Go Authors |
 | `github.com/go-text/typesetting` | v0.3.5 | BSD-3-Clause or Unlicense | Melo relies on the BSD-3-Clause option |
-| BgUtils (`internal/app/bgutils.js`) | MIT | Copyright (c) 2024 LuanRT; bundled build of [BgUtils](https://github.com/LuanRT/BgUtils) |
 
 Full texts:
 
@@ -62,11 +67,8 @@ its own license; this notice does not remove those obligations.
 
 ## External tools
 
-Melo can invoke these optional system tools but does not distribute them:
+Melo can invoke this optional system tool but does not distribute it:
 
-- `ffmpeg` for HE-AAC audio transcoding and music-video decoding. The license
-  of your locally installed ffmpeg build applies.
-- `afconvert` on macOS as an HE-AAC fallback.
 - `notify-send` on Linux for desktop notifications.
 
 ## Design reference

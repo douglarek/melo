@@ -524,8 +524,6 @@ func (c *Client) iosPlayer(ctx context.Context, videoID string) (map[string]any,
 	return c.player(ctx, iosPlayerPayload(videoID), "5", "21.26.4", iosUserAgent)
 }
 
-// ResolveStream resolves the sound to play: the ANDROID client's, which is
-// reliable and progressive when it has it, or else the HLS one iOS serves.
 // ResolveStream resolves the sound to play: a SABR download (AAC 128 kbps)
 // when it is configured and works, else the ANDROID client's stream, which
 // is reliable and progressive when it has it, or else the HLS one iOS serves.
@@ -563,8 +561,6 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 						Channels:      channels,
 						DurationMs:    durMs,
 						ContentLength: contentLength,
-						HEAAC:         strings.Contains(u, "heaudio"),
-						HasVideo:      streamsVideo(f),
 					}, nil
 				}
 			}
@@ -576,10 +572,6 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 
 // streamsVideo reports whether a player format carries a picture: the
 // progressive ones do, the adaptive audio ones do not.
-func streamsVideo(f map[string]any) bool {
-	mime, _ := f["mimeType"].(string)
-	return strings.HasPrefix(mime, "video/")
-}
 
 // ResolveHLS resolves an audio-only HLS stream through the iOS client.
 func (c *Client) ResolveHLS(ctx context.Context, videoID string) (*StreamInfo, error) {
@@ -634,64 +626,6 @@ func (c *Client) hlsManifestURL(ctx context.Context, videoID string) (string, er
 		return "", errors.New("no hlsManifestUrl returned")
 	}
 	return u, nil
-}
-
-// ResolveVideo resolves a stream with a picture for a track whose sound
-// stream has none: a video format of the Android client, or else the HLS
-// manifest iOS serves, which ffmpeg follows itself.
-func (c *Client) ResolveVideo(ctx context.Context, videoID string) (*VideoStream, error) {
-	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
-		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
-			if u, format := pickVideoURL(sd); u != "" {
-				return &VideoStream{URL: u, Format: format, UserAgent: androidUserAgent}, nil
-			}
-		}
-	}
-	if u, err := c.hlsManifestURL(ctx, videoID); err == nil && u != "" {
-		return &VideoStream{URL: u, Format: "hls", UserAgent: iosUserAgent}, nil
-	}
-	return nil, errors.New("no video stream found")
-}
-
-// pickVideoURL returns the URL of a video format in a player response and
-// its container: the progressive one when offered, else the adaptive video
-// format that costs least to decode.
-func pickVideoURL(sd map[string]any) (string, string) {
-	if formats, ok := sd["formats"].([]any); ok {
-		for _, raw := range formats {
-			f, _ := raw.(map[string]any)
-			itag, _ := f["itag"].(float64)
-			if itag != 18 {
-				continue
-			}
-			if u, _ := f["url"].(string); u != "" {
-				return u, "mp4"
-			}
-		}
-	}
-
-	best, bestFormat, bestScore := "", "", -1
-	adaptive, _ := sd["adaptiveFormats"].([]any)
-	for _, raw := range adaptive {
-		f, _ := raw.(map[string]any)
-		mime, _ := f["mimeType"].(string)
-		if !strings.HasPrefix(mime, "video/") {
-			continue
-		}
-		u, _ := f["url"].(string)
-		if u == "" {
-			continue
-		}
-		itag, _ := f["itag"].(float64)
-		if score := videoFormatScore(itag, mime); score > bestScore {
-			best, bestScore = u, score
-			bestFormat = "mp4"
-			if strings.Contains(mime, "webm") {
-				bestFormat = "webm"
-			}
-		}
-	}
-	return best, bestFormat
 }
 
 // videoFormatScore ranks a video format: H.264 at 720p and under first, as

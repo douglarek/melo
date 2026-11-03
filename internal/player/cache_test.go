@@ -44,7 +44,7 @@ func TestCachePrunesAllMediaTypes(t *testing.T) {
 	dir := t.TempDir()
 	c := NewCache(dir, 10)
 	oldPath := filepath.Join(dir, "old.mp4")
-	newPath := filepath.Join(dir, "new.heaac.mp4")
+	newPath := filepath.Join(dir, "new.alt.mp4")
 	if err := os.WriteFile(oldPath, make([]byte, 8), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,14 +58,14 @@ func TestCachePrunesAllMediaTypes(t *testing.T) {
 		t.Fatal("old mp4 was not pruned")
 	}
 	if _, err := os.Stat(newPath); err != nil {
-		t.Fatal("newer heaac mp4 was pruned")
+		t.Fatal("newer alt mp4 was pruned")
 	}
 }
 
 func TestCacheSizeCountsAllMedia(t *testing.T) {
 	dir := t.TempDir()
 	c := NewCache(dir, 1<<20)
-	for name, size := range map[string]int{"a.mp4": 3, "b.heaac.m4a": 4, "c.aac": 5, "d.json": 99, "e.part": 7} {
+	for name, size := range map[string]int{"a.mp4": 3, "b.alt.m4a": 4, "c.aac": 5, "d.json": 99, "e.part": 7} {
 		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -78,13 +78,13 @@ func TestCacheSizeCountsAllMedia(t *testing.T) {
 func TestCacheClearExceptKeepsCurrentTrack(t *testing.T) {
 	dir := t.TempDir()
 	c := NewCache(dir, 1<<20)
-	for _, name := range []string{"keep.mp4", "keep.heaac.m4a", "drop.mp4", "drop.aac", "drop.json"} {
+	for _, name := range []string{"keep.mp4", "keep.alt.m4a", "drop.mp4", "drop.aac", "drop.json"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	c.ClearExcept("keep")
-	for _, name := range []string{"keep.mp4", "keep.heaac.m4a"} {
+	for _, name := range []string{"keep.mp4", "keep.alt.m4a"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("%s was removed", name)
 		}

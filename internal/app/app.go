@@ -12,7 +12,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"github.com/douglarek/melo/internal/ffmpeg"
 	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -41,7 +40,6 @@ const (
 	paneLyrics paneKind = iota
 	paneQueue
 	paneRelated
-	paneVideo
 )
 
 // scrubState is the progress bar's own position: what it drags, and whether
@@ -157,12 +155,6 @@ type app struct {
 	mediaTrackID      string
 	mediaArtwork      string
 	mediaDuration     time.Duration
-	npVideoMode       bool
-	npVideoStarting   bool
-	npVideoSeq        int
-	npVideo           *ui.VideoPlayer
-	npVideoTrack      string
-	npVideoKick       string
 	lastPlayedTrackID string
 	memoryTimer       *time.Timer
 	notifyTrackID     string
@@ -234,7 +226,6 @@ func Run() error {
 		a.pl.Changed = func() {
 			a.post(func() {
 				cur := a.pl.Current()
-				a.resetVideoForTrack(cur)
 				a.maybeNotifyTrack(cur)
 				a.syncNowPlayingLyrics()
 				a.publishNowPlaying()
@@ -308,12 +299,6 @@ func Run() error {
 
 func (a *app) boot() {
 	a.homeLoading = true
-	// Find ffmpeg before a video or HE-AAC track needs it, off the UI
-	// thread: the login shell it may ask takes a moment. A miss is fine,
-	// as the next video or HE-AAC track looks again.
-	go func() {
-		_, _ = ffmpeg.Resolve(a.ctx)
-	}()
 	go func() {
 		// Restore user session
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

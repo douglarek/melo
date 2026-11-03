@@ -12,11 +12,6 @@ The app embeds two PNGs:
 The SVGs are the editable sources. After changing an SVG, regenerate its PNG
 from this directory:
 
-```bash
-ffmpeg -y -i tray-template.svg tray-template.png
-ffmpeg -y -i tray-color.svg tray-color.png
-```
-
-Any SVG rasterizer works; keep the transparent background for the template
-and preserve the PNG dimensions. Then rebuild the app. No Go code changes are
+Use any SVG rasterizer to regenerate the PNGs; keep the transparent
+background for the template and preserve the PNG dimensions. Then rebuild the app. No Go code changes are
 needed.

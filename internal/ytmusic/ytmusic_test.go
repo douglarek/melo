@@ -294,51 +294,6 @@ func TestPickAndroidAudio(t *testing.T) {
 	}
 }
 
-func TestStreamsVideo(t *testing.T) {
-	if !streamsVideo(map[string]any{"mimeType": `video/mp4; codecs="avc1.42001E, mp4a.40.2"`}) {
-		t.Error("a progressive format was not found to carry a picture")
-	}
-	if streamsVideo(map[string]any{"mimeType": `audio/mp4; codecs="mp4a.40.2"`}) {
-		t.Error("an audio format was found to carry a picture")
-	}
-}
-
-func TestPickVideoURL(t *testing.T) {
-	raw := `{
-		"formats": [{"itag": 18, "url": "https://example.com/18.mp4", "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\""}],
-		"adaptiveFormats": [
-			{"itag": 137, "url": "https://example.com/137.mp4", "mimeType": "video/mp4; codecs=\"avc1.640028\""},
-			{"itag": 136, "url": "https://example.com/136.mp4", "mimeType": "video/mp4; codecs=\"avc1.4D401F\""},
-			{"itag": 140, "url": "https://example.com/140.m4a", "mimeType": "audio/mp4; codecs=\"mp4a.40.2\""}
-		]
-	}`
-	var sd map[string]any
-	if err := json.Unmarshal([]byte(raw), &sd); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	if u, format := pickVideoURL(sd); u != "https://example.com/18.mp4" || format != "mp4" {
-		t.Errorf("progressive pick = %q, %q, want the muxed format", u, format)
-	}
-
-	delete(sd, "formats")
-	if u, _ := pickVideoURL(sd); u != "https://example.com/136.mp4" {
-		t.Errorf("adaptive pick = %q, want the 720p H.264 format", u)
-	}
-
-	// Without H.264, the best of what is there, in its own container.
-	var webm map[string]any
-	raw = `{"adaptiveFormats": [
-		{"itag": 247, "url": "https://example.com/247.webm", "mimeType": "video/webm; codecs=\"vp9\""},
-		{"itag": 400, "url": "https://example.com/400.mp4", "mimeType": "video/mp4; codecs=\"av01.0.05M.08\""}
-	]}`
-	if err := json.Unmarshal([]byte(raw), &webm); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	if u, format := pickVideoURL(webm); u != "https://example.com/400.mp4" || format != "mp4" {
-		t.Errorf("av1 pick = %q, %q, want the AV1 format over VP9", u, format)
-	}
-}
-
 func TestPickAudioPlaylist(t *testing.T) {
 	masterM3U8 := `#EXTM3U
 #EXT-X-MEDIA:URI="https://manifest.googlevideo.com/api/manifest/hls_playlist/itag/233/playlist.m3u8",TYPE=AUDIO,GROUP-ID="233"

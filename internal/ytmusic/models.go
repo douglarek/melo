@@ -261,20 +261,8 @@ type StreamInfo struct {
 	ContentLength int64
 	// LocalPath is a downloaded file to play instead of a URL, and Sabr
 	// downloads it while it plays.
-	LocalPath string
-	Sabr      *SabrSession
-	HEAAC     bool
-	// HasVideo says the stream carries a picture as well as sound.
-	HasVideo    bool
+	LocalPath   string
+	Sabr        *SabrSession
 	HLSPlaylist string
 	Segments    []StreamSegment
-}
-
-// VideoStream is a picture to show for a track, as ffmpeg takes it: a
-// progressive or adaptive format of the Android client, or the HLS manifest
-// iOS serves, which ffmpeg follows itself.
-type VideoStream struct {
-	URL       string
-	Format    string // "mp4", "webm" or "hls"
-	UserAgent string
 }

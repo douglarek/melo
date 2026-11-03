@@ -307,28 +307,3 @@ func (a *app) npRelatedCard(c *ui.Context, key string, item ytmusic.CardItem, wi
 		}
 	})
 }
-
-// npVideoPane shows what plays as a picture, as large as the pane holds,
-// the video's own 16:9 box centered in it.
-func (a *app) npVideoPane(c *ui.Context, paneW, paneH float32) {
-	ui.Box(c.Key("np-video-area")).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		a.ensureVideo(c)
-		if a.npVideo == nil {
-			ui.Column(c).AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
-				ui.Spinner(c)
-				ui.Text(c, "正在准备视频…").FontSize(13).TextColor(npWhite.Alpha(0.55))
-			})
-			return
-		}
-		w := min(paneW, paneH*16/9)
-		if w <= 0 {
-			return
-		}
-		h := w * 9 / 16
-		frame := ui.Box(c.Key("np-video-frame")).Size(w, h).Radius(12).
-			Background(ui.RGB(0, 0, 0)).Shadow(0, 22, 50, -20, ui.RGBA(0, 0, 0, 0.75))
-		frame.Children(func() {
-			ui.Video(c, a.npVideo).Fill().Fit(ui.Contain).Radius(12)
-		})
-	})
-}

@@ -1136,7 +1136,6 @@ func (a *app) link(c *ui.Context, text string, color, hover ui.Color, r route) {
 	}
 	if row.Clicked() {
 		a.nowPlayingOpen = false
-		a.closeVideo()
 		a.open(r)
 	}
 }

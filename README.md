@@ -1,6 +1,6 @@
 # Melo
 
-Melo 是用 Go 和 [MyGo](https://github.com/egoist/mygo) 实现的第三方 YouTube Music 原生桌面客户端，界面参考 [mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic)。主界面由 MyGo UI 原生 GPU 渲染，登录环节复用系统网页视图。AAC-LC 播放链路为纯 Go 实现，HE-AAC 与音乐视频使用 ffmpeg。
+Melo 是用 Go 和 [MyGo](https://github.com/egoist/mygo) 实现的第三方 YouTube Music 原生桌面客户端，界面参考 [mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic)。主界面由 MyGo UI 原生 GPU 渲染，登录环节复用系统网页视图。AAC-LC 本地、SABR 自适应流与 MP4 播放为纯 Go 实现。
 
 ## 功能特性
 
@@ -9,18 +9,14 @@ Melo 是用 Go 和 [MyGo](https://github.com/egoist/mygo) 实现的第三方 You
 - **托盘支持**：菜单栏 / 系统托盘可显示或隐藏窗口，并控制播放。
 - **账号与媒体库**：应用内 Google 登录，同步「我喜欢的音乐」、云端歌单和点赞状态。
 - **浏览与搜索**：首页、探索、排行榜、播客和搜索，支持歌单、专辑、艺人详情与分类筛选。
-- **播放**：AAC-LC 纯 Go 解码，MP4 / HLS 流式播放，支持本地缓存、随机 / 循环和音量淡入淡出；HE-AAC 与音乐视频需要 `ffmpeg`。
-- **正在播放**：大封面、同步歌词、待播清单、相关推荐和音乐视频。
+- **播放**：AAC-LC 纯 Go 解码，YouTube 自适应流（AAC 128 kbps，边下边播）/ MP4 / HLS 播放，支持本地缓存、随机 / 循环和音量淡入淡出。
+- **正在播放**：大封面、同步歌词、待播清单和相关推荐。
 
 ## 构建与运行
 
 需要 Go 1.27+。
 
 ```bash
-# ffmpeg 可选：HE-AAC 曲目和音乐视频需要
-brew install ffmpeg            # macOS
-sudo apt install ffmpeg        # Debian / Ubuntu
-
 # Linux 必选依赖
 sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 \
   libgl1-mesa-dri libglx-mesa0 libegl-mesa0

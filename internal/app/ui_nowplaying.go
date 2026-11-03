@@ -58,14 +58,9 @@ func activeLyricLine(lines []ytmusic.LyricLine, synced bool, pos time.Duration) 
 	return active
 }
 
-// npPanes returns the tabs Now Playing shows for what plays: the video only
-// for a track that has one.
-func (a *app) npPanes(cur *ytmusic.Track) []paneKind {
-	panes := []paneKind{paneLyrics, paneQueue, paneRelated}
-	if cur != nil && cur.Video {
-		panes = append(panes, paneVideo)
-	}
-	return panes
+// npPanes returns the tabs Now Playing shows.
+func (a *app) npPanes() []paneKind {
+	return []paneKind{paneLyrics, paneQueue, paneRelated}
 }
 
 func npPaneLabel(pane paneKind) string {
@@ -74,8 +69,6 @@ func npPaneLabel(pane paneKind) string {
 		return "待播清单"
 	case paneRelated:
 		return "相关推荐"
-	case paneVideo:
-		return "视频"
 	default:
 		return "歌词"
 	}
@@ -87,8 +80,6 @@ func npPaneKey(pane paneKind) string {
 		return "queue"
 	case paneRelated:
 		return "related"
-	case paneVideo:
-		return "video"
 	default:
 		return "lyrics"
 	}
@@ -97,20 +88,7 @@ func npPaneKey(pane paneKind) string {
 // choosePane shows pane in Now Playing, remembering where playback stands so
 // that the queue opens at the track playing.
 func (a *app) choosePane(pane paneKind) {
-	if pane == paneVideo {
-		if cur := a.pl.Current(); cur == nil || !cur.Video {
-			return
-		}
-	}
 	a.npPane = pane
-	if pane == paneVideo {
-		a.npVideoMode = true
-		// A click on the tab asks again for a stream that did not load.
-		a.npVideoKick = ""
-	} else {
-		a.npVideoMode = false
-		a.closeVideo()
-	}
 	switch pane {
 	case paneRelated:
 		a.loadRelated()
@@ -119,8 +97,7 @@ func (a *app) choosePane(pane paneKind) {
 	}
 }
 
-// closeNowPlaying starts hiding the view, which stops any video playing in
-// it once it is gone.
+// closeNowPlaying starts hiding the view.
 func (a *app) closeNowPlaying() {
 	a.nowPlayingOpen = false
 }
@@ -155,11 +132,8 @@ func (a *app) nowPlayingLayer(c *ui.Context) {
 	}
 	layer.AnimatePose(pose, npSpring)
 	if !open && settled {
-		// Closed: nothing to paint or click. The video stops once it is
-		// gone, not as it goes, which would start it again in the pane.
 		if !a.npRest {
 			a.npRest = true
-			a.closeVideo()
 		}
 		layer.Invisible()
 		return
@@ -231,15 +205,7 @@ func (a *app) nowPlayingView(c *ui.Context) {
 	cur := a.pl.Current()
 	if cur == nil {
 		a.nowPlayingOpen = false
-		a.closeVideo()
 		return
-	}
-	if !cur.Video && (a.npVideoMode || a.npVideo != nil || a.npVideoStarting) {
-		a.npVideoMode = false
-		a.closeVideo()
-	}
-	if a.npPane == paneVideo && (!cur.Video || (!a.npVideoMode && !a.npVideoStarting)) {
-		a.npPane = paneLyrics
 	}
 
 	// Request frequent frames for smooth lyrics scrolling and the scrubber.
@@ -285,7 +251,7 @@ func (a *app) npBackdrop(c *ui.Context, tint ui.Color, w float32) {
 // npShortcuts binds Esc to closing the view and ⌘1 to ⌘4 to its tabs.
 func (a *app) npShortcuts(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyEscape, a.closeNowPlaying)
-	for i, pane := range a.npPanes(a.pl.Current()) {
+	for i, pane := range a.npPanes() {
 		if i >= 4 {
 			break
 		}
@@ -323,7 +289,7 @@ func (a *app) npTabs(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 	m := npMetrics(w, h)
 	ui.Row(c.Key("np-tabs")).FillWidth().Height(npTabsHeight).Padding(0, m.inset, 0, m.paneX).
 		AlignItems(ui.Center).Gap(4).Children(func() {
-		for _, pane := range a.npPanes(cur) {
+		for _, pane := range a.npPanes() {
 			a.npTabButton(c, pane)
 		}
 		ui.Spacer(c)
@@ -436,10 +402,8 @@ func (a *app) npBody(c *ui.Context, cur *ytmusic.Track, w, h float32) {
 		})
 
 		ui.Column(c.Key("np-pane")).Grow(1).Basis(0).MinWidth(0).FillHeight().Children(func() {
-			// The video takes the pane whole, centered under the tabs, where
-			// the other panes start level with the cover.
 			paneH := m.rowH
-			if a.npPane != paneVideo && m.paneTop > 0 {
+			if m.paneTop > 0 {
 				ui.Box(c).Height(m.paneTop)
 				paneH -= m.paneTop
 			}
@@ -748,8 +712,6 @@ func (a *app) npPaneContent(c *ui.Context, cur *ytmusic.Track, paneW, paneH floa
 		a.npQueuePane(c)
 	case paneRelated:
 		a.npRelatedPane(c, paneW)
-	case paneVideo:
-		a.npVideoPane(c, paneW, paneH)
 	default:
 		a.npLyricsPane(c)
 	}

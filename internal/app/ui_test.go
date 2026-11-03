@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"image/png"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -698,28 +696,6 @@ func TestSearchAlbumCardOpensAlbum(t *testing.T) {
 	}
 }
 
-func TestVideoToggleOnlyForVideoTracks(t *testing.T) {
-	a := newTestApp(t)
-	video := ytmusic.Track{ID: "video1", Title: "Music Video", Video: true, DurationMs: 200000}
-	a.pl.SetQueue([]ytmusic.Track{video}, 0)
-	a.nowPlayingOpen = true
-	a.npVideoMode = false
-	tt := ui.NewTester(a.view, 1200, 900)
-	tt.Frame()
-	if !tt.HasText("视频") {
-		t.Fatal("video track did not show the video tab")
-	}
-
-	audio := ytmusic.Track{ID: "audio1", Title: "Audio Song", DurationMs: 200000}
-	a.pl.SetQueue([]ytmusic.Track{audio}, 0)
-	a.nowPlayingOpen = true
-	a.npVideoMode = false
-	tt.Frame()
-	if tt.HasText("视频") {
-		t.Fatal("audio-only track showed the video tab")
-	}
-}
-
 func TestArtistPageMixedArtistCardOpensArtist(t *testing.T) {
 	a := newTestApp(t)
 	a.route = route{page: pageArtist, id: "UCmain"}
@@ -1206,32 +1182,6 @@ func TestNowPlayingArtistLinkOpensArtist(t *testing.T) {
 	}
 }
 
-func TestVideoTrackDefaultsToAudio(t *testing.T) {
-	a := newTestApp(t)
-	a.pl.SetQueue([]ytmusic.Track{{
-		ID: "video1", Title: "测试视频歌曲", Video: true,
-	}}, 0)
-	a.nowPlayingOpen = true
-	a.npVideoMode = true
-	a.lastPlayedTrackID = "previous"
-	a.resetVideoForTrack(a.pl.Current())
-	if a.npVideoMode {
-		t.Fatal("video track should default to audio mode")
-	}
-	a.npVideoMode = true
-	a.resetVideoForTrack(a.pl.Current())
-	if !a.npVideoMode {
-		t.Fatal("switching video mode for the current track should be preserved")
-	}
-	a.npVideoMode = false
-
-	tt := ui.NewTester(a.view, 1200, 800)
-	tt.Frame()
-	if !tt.HasText("歌词") || !tt.HasText("视频") {
-		t.Fatal("now playing should show lyrics by default with a video tab")
-	}
-}
-
 func TestNowPlayingQueue(t *testing.T) {
 	a := newTestApp(t)
 	t1 := ytmusic.Track{ID: "track1", Title: "晴天", Artists: []ytmusic.ArtistRef{{Name: "周杰伦"}}, DurationMs: 269000}
@@ -1313,36 +1263,6 @@ func TestNowPlayingRelatedTab(t *testing.T) {
 	}
 	if a.route.page != pagePlaylist || a.route.id != "VLPL123" {
 		t.Fatalf("route = %+v, want playlist VLPL123", a.route)
-	}
-}
-
-func TestNowPlayingVideoTab(t *testing.T) {
-	a := newTestApp(t)
-	a.pl.SetQueue([]ytmusic.Track{{ID: "video1", Title: "视频曲目", Video: true, DurationMs: 200000}}, 0)
-	a.nowPlayingOpen = true
-	// Keep the video preparing, as it would while ffmpeg starts: offline the
-	// pane falls back to lyrics.
-	a.npVideoStarting = true
-
-	tt := ui.NewTester(a.view, 1200, 900)
-	tt.Frame()
-	if err := tt.Click("视频"); err != nil {
-		t.Fatalf("click video tab: %v", err)
-	}
-	tt.Frame()
-	if a.npPane != paneVideo {
-		t.Fatalf("pane = %v, want video", a.npPane)
-	}
-	if !tt.HasText("正在准备视频…") {
-		t.Fatal("video pane did not show its loading state")
-	}
-
-	if err := tt.Click("歌词"); err != nil {
-		t.Fatalf("click lyrics tab: %v", err)
-	}
-	tt.Frame()
-	if a.npPane != paneLyrics || a.npVideoMode {
-		t.Fatalf("pane = %v video = %v, want lyrics", a.npPane, a.npVideoMode)
 	}
 }
 
@@ -1431,32 +1351,6 @@ func TestMediaKeysDriveThePlayer(t *testing.T) {
 	a.handleMediaCommand(mygo.MediaSeek, 42*time.Second)
 	if got := a.pl.Position(); got != 42*time.Second {
 		t.Fatalf("seek moved to %v, want 42s", got)
-	}
-}
-
-func TestVideoPaneStartsARestoredTrack(t *testing.T) {
-	a := newTestApp(t)
-	video := ytmusic.Track{ID: "video1", Title: "视频曲目", Video: true, DurationMs: 200000}
-	a.pl.Restore(player.Session{Queue: []ytmusic.Track{video}, At: 0, Volume: 1})
-	a.nowPlayingOpen = true
-	a.npPane = paneVideo
-	a.npVideoMode = true
-
-	asked := make(chan struct{}, 1)
-	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		select {
-		case asked <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("offline")
-	}
-
-	tt := ui.NewTester(a.view, 1200, 800)
-	tt.Frame()
-	select {
-	case <-asked:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the video pane did not start the stream of a restored track")
 	}
 }
 
