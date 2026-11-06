@@ -104,11 +104,12 @@ func (a *app) view(c *ui.Context) {
 func (a *app) sidebar(c *ui.Context) {
 	p := a.pal
 
-	// Draggable area above the navigation rows
-	topDrag := ui.Box(c.Key("sidebar-top-drag")).Absolute().Top(0).Left(0).Right(0).Height(sidebarTopInset(c.TitleBar())).DragWindow()
-	if topDrag.DoubleClicked() {
-		a.toggleMaximize()
-	}
+	// Draggable area above the navigation rows. It is a bare drag region:
+	// Clicked, Pressed or DoubleClicked would make it take the pointer, and
+	// mygo moves the window only for a press that a drag region alone takes.
+	// A double click on it zooms the window, as mygo does for every drag
+	// region.
+	ui.Box(c.Key("sidebar-top-drag")).Absolute().Top(0).Left(0).Right(0).Height(sidebarTopInset(c.TitleBar())).DragWindow()
 
 	// Middle scrollable area for navigation & playlists
 	ui.Scroll(c.Key("sidebar-scroll")).Vertical().Grow(1).FillWidth().Children(func() {
@@ -221,10 +222,9 @@ func (a *app) sidebar(c *ui.Context) {
 func (a *app) header(c *ui.Context) {
 	p := a.pal
 
+	// A bare drag region: a click handler here would take the pointer and
+	// the window would never move (see the sidebar's drag region).
 	headerBar := ui.Row(c.Key("header-bar")).FillWidth().Height(headerHeight).Padding(0, 24).AlignItems(ui.Center).Gap(12).DragWindow()
-	if headerBar.DoubleClicked() {
-		a.toggleMaximize()
-	}
 	headerBar.Children(func() {
 		// History Back & Forward
 		backBtn := ui.Box(c.Key("nav-back")).Size(32, 32).Radius(16).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)

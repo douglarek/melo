@@ -266,10 +266,9 @@ func (a *app) npShortcuts(c *ui.Context) {
 }
 
 func (a *app) npTopBar(c *ui.Context) {
+	// A bare drag region: a click handler here would take the pointer and
+	// the window would never move (see the sidebar's drag region).
 	bar := ui.Row(c.Key("np-top-bar")).FillWidth().Height(npTopBarHeight).AlignItems(ui.Center).Justify(ui.Center).DragWindow()
-	if bar.DoubleClicked() {
-		a.toggleMaximize()
-	}
 	bar.Children(func() {
 		close := ui.Box(c.Key("np-close")).Label("收起正在播放").Size(34, 34).Radius(17).
 			AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
