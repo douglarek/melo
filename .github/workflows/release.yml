@@ -56,13 +56,21 @@ jobs:
             exit 1
           fi
 
+      # The release page shows the version's chapter of CHANGELOG.md, as the
+      # update window does: one place describes a version.
+      - name: Write the notes of the release page
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## \\[?"v"\\]?" {f=1; next} f && /^## / {exit} f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --draft --verify-tag --title "Melo $GITHUB_REF_NAME" --generate-notes
+              --draft --verify-tag --title "Melo $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
   # One build job after the other, not side by side: each merges its lines
