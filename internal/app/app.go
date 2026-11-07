@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -62,13 +63,19 @@ type route struct {
 }
 
 type app struct {
-	mu             sync.Mutex
-	win            *mygo.Window
-	pl             *player.Player
-	art            *artCache
-	artPins        map[string]bool
-	pal            palette
-	settings       settings
+	mu       sync.Mutex
+	win      *mygo.Window
+	pl       *player.Player
+	art      *artCache
+	artPins  map[string]bool
+	pal      palette
+	settings settings
+	update   updateStatus
+	// updateOn mirrors settings.CheckUpdates for updateLoop, which reads it
+	// from its own goroutine; updateWake pokes that loop when the switch
+	// moves.
+	updateOn       atomic.Bool
+	updateWake     chan struct{}
 	route          route
 	history        []route
 	forwardHistory []route
@@ -94,6 +101,7 @@ type app struct {
 
 	// Settings modal
 	settingsModalOpen bool
+	settingsScroll    ui.ScrollState
 
 	// Content data
 	homeSections    []ytmusic.Section
@@ -176,11 +184,13 @@ func (a *app) post(fn func()) {
 
 // Run boots the application and launches the main window.
 func Run() error {
+	useUpdatePlugin()
 	mygo.Bind(&Pot{client: &http.Client{Timeout: 30 * time.Second}})
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{
 		ctx:         ctx,
 		cancel:      cancel,
+		updateWake:  make(chan struct{}, 1),
 		playlists:   map[string]*ytmusic.Playlist{},
 		albums:      map[string]*ytmusic.Album{},
 		artists:     map[string]*ytmusic.Artist{},
@@ -266,6 +276,7 @@ func Run() error {
 		})
 
 		a.setMenu()
+		a.setupUpdates()
 		a.setupMediaKeys()
 		a.setupTray()
 		a.win.OnClose(func(e *mygo.CloseEvent) {
@@ -311,6 +322,7 @@ func Run() error {
 		a.restorePlayerSession()
 		a.boot()
 		go a.maintenanceLoop(a.ctx)
+		go a.updateLoop(a.ctx)
 	})
 
 	return mygo.App.Run()

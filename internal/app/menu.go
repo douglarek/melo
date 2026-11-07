@@ -18,6 +18,7 @@ func (a *app) setMenu() {
 	appMenu := []*mygo.MenuItem{
 		{Role: mygo.RoleAbout, Label: "关于 " + name},
 		mygo.Separator(),
+		{Label: "检查更新…", Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
 		{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: run(func() { a.settingsModalOpen = true })},
 		mygo.Separator(),
 	}

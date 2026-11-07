@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -14,6 +15,21 @@ type settings struct {
 	CacheMB            int64    `json:"cacheMB"`
 	CloseToTray        bool     `json:"closeToTray"`
 	TrackNotifications bool     `json:"trackNotifications"`
+	// CheckUpdates reports whether Melo looks for new versions in the
+	// background, and points at them in the sidebar and the tray. It is
+	// off by default: the .deb and the RPM are updated by the package
+	// manager that installed them, so only people who installed the macOS
+	// app or the Windows installer want it.
+	CheckUpdates bool `json:"checkUpdates"`
+	// UpdateLastCheck is when a check last found out whether a newer
+	// version is out.
+	UpdateLastCheck time.Time `json:"updateLastCheck,omitzero"`
+	// UpdateAvailable is the newer version that the last check found, and
+	// "" once there is none, or once the user skipped it.
+	UpdateAvailable string `json:"updateAvailable,omitempty"`
+	// UpdateSkipped is the version the user skipped in the update window,
+	// which background checks do not point at again.
+	UpdateSkipped string `json:"updateSkipped,omitempty"`
 }
 
 func defaultSettings() settings {
@@ -26,7 +42,7 @@ func defaultSettings() settings {
 }
 
 func settingsPath() (string, error) {
-	dir, err := mygo.App.Path(mygo.PathUserData)
+	dir, err := userDataDir()
 	if err != nil {
 		return "", err
 	}

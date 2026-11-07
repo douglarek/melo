@@ -2,7 +2,7 @@
   "name": "Melo",
   "identifier": "vibe.melo",
   "slug": "melo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "out": "build",
   "icon": "resources/icon.png",
   "resources": [
@@ -11,6 +11,11 @@
     "THIRD_PARTY_NOTICES.md",
     "licenses"
   ],
+  "updates": {
+    "publicKey": "vX3aA78EZQg2giA7qehQMumJdgRto+UKDIWBQlKxggE=",
+    "github": "douglarek/melo",
+    "changelog": "CHANGELOG.md"
+  },
   "macos": {
     "minimumSystemVersion": "13.0"
   },

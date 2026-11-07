@@ -180,7 +180,10 @@ func (a *app) sidebar(c *ui.Context) {
 	})
 
 	// Foot of sidebar: clean, continuous sidebar without dividing line
-	ui.Box(c.Key("sidebar-foot")).Height(playerHeight).FillWidth().Padding(0, 10).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+	ui.Column(c.Key("sidebar-foot")).FillWidth().Padding(0, 10, 6, 10).Gap(6).Justify(ui.End).Children(func() {
+		if a.settings.UpdateAvailable != "" {
+			a.updateBadge(c)
+		}
 		userRow := ui.Row(c.Key("sidebar-user-row")).FillWidth().Height(44).Radius(8).Padding(0, 8).AlignItems(ui.Center).Gap(10).Cursor(ui.CursorPointer)
 		if userRow.Hovered() {
 			userRow.Background(p.hover)
@@ -216,6 +219,23 @@ func (a *app) sidebar(c *ui.Context) {
 				a.settingsModalOpen = true
 			}
 		}
+	})
+}
+
+// updateBadge points at the version a background check found. Clicking it
+// opens the update window, which checks again and offers to install it.
+func (a *app) updateBadge(c *ui.Context) {
+	p := a.pal
+	badge := ui.Row(c.Key("sidebar-update")).FillWidth().Height(28).Radius(8).Background(p.card).Padding(0, 10).AlignItems(ui.Center).Gap(7).Cursor(ui.CursorPointer).Tooltip("有可用更新，点击查看")
+	if badge.Hovered() {
+		badge.Background(p.press)
+	}
+	if badge.Clicked() {
+		a.checkUpdates()
+	}
+	badge.Children(func() {
+		ui.Box(c).Size(6, 6).Radius(3).Background(p.accent)
+		ui.Text(c, "有更新 "+a.settings.UpdateAvailable).FontSize(12).TextColor(p.accent).SingleLine()
 	})
 }
 
