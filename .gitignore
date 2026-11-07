@@ -13,4 +13,11 @@ window-state.json
 .env.*
 *.pem
 *.key
+# The key pair that signs updates, which `go tool mygo keygen` writes here:
+# its public half is in mygo.json, and the private one belongs in the
+# repository's secrets.
+.update-keys/
+# Go caches of a sandboxed checkout.
+.gocache/
+.gomodcache/
 .DS_Store
