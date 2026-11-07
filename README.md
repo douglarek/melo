@@ -1,4 +1,4 @@
-# Melo
+# Melo ![vibe with deepseek](https://img.shields.io/badge/vibe%20with%20deepseek-blue?style=flat-square) [![Copr build status](https://copr.fedorainfracloud.org/coprs/douglarek/pkgs/package/melo/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/douglarek/pkgs/package/melo/)
 
 Melo 是用 Go 和 [MyGo](https://github.com/egoist/mygo) 实现的第三方 YouTube Music 原生桌面客户端，界面参考 [mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic)。主界面由 MyGo UI 原生 GPU 渲染，登录环节复用系统网页视图。AAC-LC 本地、SABR 自适应流与 MP4 播放为纯 Go 实现。
 
