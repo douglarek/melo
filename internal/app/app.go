@@ -28,6 +28,7 @@ const (
 	pagePlaylist
 	pageAlbum
 	pageArtist
+	pageArtistSongs
 	pageSearch
 	pageLiked
 	pageCategory
@@ -509,6 +510,24 @@ func (a *app) loadCurrentRoute() {
 				})
 			}()
 		}
+	case pageArtistSongs:
+		id := a.route.id
+		key := artistSongsKey(id)
+		art := a.artists[id]
+		if a.playlists[key] != nil || a.loadingMore[key] || art == nil || art.SongsID == "" {
+			return
+		}
+		a.loadingMore[key] = true
+		go func(browseID, params string) {
+			songs, _ := ytmusic.DefaultClient.BrowseArtistSongs(ctx, browseID, params)
+			a.post(func() {
+				a.loadingMore[key] = false
+				if songs == nil {
+					songs = &ytmusic.Playlist{ID: browseID}
+				}
+				a.playlists[key] = songs
+			})
+		}(art.SongsID, art.SongsParams)
 	case pageSearch:
 		r := a.route
 		if a.searches[r] == nil && r.query != "" {
@@ -743,6 +762,8 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 		}
 	case pageLiked:
 		key = "LM"
+	case pageArtistSongs:
+		key = artistSongsKey(a.route.id)
 	default:
 		return
 	}

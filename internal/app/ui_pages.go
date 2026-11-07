@@ -458,7 +458,7 @@ func (a *app) trackListState(key string) *ui.ListState {
 
 func (a *app) pageUsesTrackList() bool {
 	switch a.route.page {
-	case pagePlaylist, pageAlbum, pageLiked, pageArtist:
+	case pagePlaylist, pageAlbum, pageLiked, pageArtist, pageArtistSongs:
 		return true
 	case pageSearch:
 		if a.route.kind != ytmusic.SearchSongs && a.route.kind != ytmusic.SearchVideos && a.route.kind != ytmusic.SearchPodcastEpisodes {
@@ -480,6 +480,8 @@ func (a *app) currentTrackListState() *ui.ListState {
 		return a.trackListState("album:" + a.route.id)
 	case pageLiked:
 		return a.trackListState("liked")
+	case pageArtistSongs:
+		return a.trackListState(artistSongsKey(a.route.id))
 	default:
 		return nil
 	}
@@ -787,6 +789,13 @@ func playlistKey(id string) string {
 	return id
 }
 
+// artistSongsKey is the cache key of an artist's complete song list. The list
+// is playlist-shaped — it pages by continuation and plays as a queue — so it
+// lives in the playlist cache, under a key no playlist route can use.
+func artistSongsKey(artistID string) string {
+	return "artist-songs:" + artistID
+}
+
 func (a *app) playlistMoreFooter(c *ui.Context, key string) {
 	p := a.pal
 	ui.Row(c).FillWidth().Height(44).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
@@ -907,14 +916,18 @@ func (a *app) artistHeader(c *ui.Context, art *ytmusic.Artist) {
 				if art.Subscribers != "" {
 					ui.Text(c, art.Subscribers+" 订阅者").FontSize(13).TextColor(p.muted)
 				}
-				allSongsBtn := ui.Row(c.Key("art-all-songs")).AlignSelf(ui.Start).Height(32).Radius(16).Background(p.card).Padding(0, 16).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
-				if allSongsBtn.Clicked() {
-					a.open(route{page: pageSearch, query: art.Name, kind: ytmusic.SearchSongs})
+				// The shelf's more button is the only way to the artist's
+				// complete song list; without it there is nothing to show.
+				if art.SongsID != "" {
+					allSongsBtn := ui.Row(c.Key("art-all-songs")).AlignSelf(ui.Start).Height(32).Radius(16).Background(p.card).Padding(0, 16).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
+					if allSongsBtn.Clicked() {
+						a.open(route{page: pageArtistSongs, id: art.ID})
+					}
+					allSongsBtn.Children(func() {
+						ui.Icon(c, iconMusic).Size(14, 14).TextColor(p.text)
+						ui.Text(c, "查看所有歌曲").FontSize(12).Bold().TextColor(p.text)
+					})
 				}
-				allSongsBtn.Children(func() {
-					ui.Icon(c, iconSearch).Size(14, 14).TextColor(p.text)
-					ui.Text(c, "查看所有歌曲").FontSize(12).Bold().TextColor(p.text)
-				})
 			})
 		})
 		if len(art.TopTracks) > 0 {
@@ -951,6 +964,91 @@ func (a *app) artistSinglesSection(c *ui.Context, art *ytmusic.Artist) {
 		}
 	}
 	a.renderSection(c, "artist-singles-"+art.ID, ytmusic.Section{Title: "单曲与迷你专辑", Items: items})
+}
+
+// viewArtistSongs shows the song list behind an artist page. The shelf on the
+// artist page previews only a handful of songs, and searching the artist's
+// name would hand back other artists' hits under that name.
+func (a *app) viewArtistSongs(c *ui.Context) {
+	p := a.pal
+	id := a.route.id
+	key := artistSongsKey(id)
+	pl := a.playlists[key]
+	if pl == nil {
+		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
+			ui.Spinner(c)
+			ui.Text(c, "正在加载歌曲...").FontSize(14).TextColor(p.muted)
+		})
+		return
+	}
+
+	tracks := pl.Tracks
+	if len(tracks) == 0 && !a.loadingMore[key] {
+		ui.Column(c).FillWidth().Gap(20).Children(func() {
+			a.artistSongsHeader(c, id, key, pl, tracks)
+			a.libraryEmpty(c, "暂无歌曲")
+		})
+		return
+	}
+
+	a.maybeLoadMorePlaylist(c)
+
+	count := 1 + len(tracks)
+	if a.loadingMore[key] {
+		count++
+	}
+	cur := a.pl.Current()
+	ui.List(c, a.trackListState(key), count).Fill().Gap(2).Rows(func(r ui.ListRow) {
+		switch {
+		case r.Index == 0:
+			a.artistSongsHeader(r.Context, id, key, pl, tracks)
+		case r.Index <= len(tracks):
+			a.renderTrackRow(r.Context, tracks, r.Index-1, cur)
+		default:
+			a.playlistMoreFooter(r.Context, key)
+		}
+	})
+}
+
+func (a *app) artistSongsHeader(c *ui.Context, artistID, key string, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
+	p := a.pal
+	name, cover := pl.Title, ""
+	if art := a.artists[artistID]; art != nil {
+		name, cover = art.Name, art.Thumbnail
+	}
+	if name == "" {
+		name = "全部歌曲"
+	}
+
+	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
+		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
+			a.coverImage(c, cover, 160, 12)
+			ui.Column(c).Grow(1).Gap(8).Children(func() {
+				ui.Text(c, "音乐人").FontSize(12).Bold().TextColor(p.accent)
+				ui.Text(c, name).FontSize(28).Bold().TextColor(p.text)
+				ui.Text(c, artistSongsCount(len(tracks), pl.Continuation != "")).FontSize(13).TextColor(p.muted)
+				playAllBtn := ui.Row(c.Key("artist-songs-play-all")).AlignSelf(ui.Start).Height(36).Radius(18).Background(p.accent).Padding(0, 18).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
+				if playAllBtn.Clicked() {
+					if len(tracks) > 0 {
+						a.playAllPlaylist(c, key, tracks)
+					}
+				}
+				playAllBtn.Children(func() {
+					ui.Icon(c, iconPlay).Size(16, 16).TextColor(p.onAccent)
+					ui.Text(c, fmt.Sprintf("播放全部 (%d 首)", len(tracks))).FontSize(13).Bold().TextColor(p.onAccent)
+				})
+			})
+		})
+	})
+}
+
+// artistSongsCount reports how much of a paged song list has arrived: the
+// endpoint answers a page at a time until its continuation runs dry.
+func artistSongsCount(loaded int, more bool) string {
+	if more {
+		return fmt.Sprintf("已加载 %d 首歌曲", loaded)
+	}
+	return fmt.Sprintf("共 %d 首歌曲", loaded)
 }
 
 func (a *app) viewLiked(c *ui.Context) {

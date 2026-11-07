@@ -581,19 +581,7 @@ func (c *Client) BrowsePlaylist(ctx context.Context, playlistID string) (*Playli
 	parsePlaylistHeader(headerObj, pl)
 
 	// Tracks can be in secondaryContents or singleColumnBrowseResultsRenderer
-	var rawTracks []any
-	var continuation string
-	if tc, ok := contents["twoColumnBrowseResultsRenderer"].(map[string]any); ok {
-		sec, _ := tc["secondaryContents"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
-		rawTracks, continuation = findShelfContents(sec)
-	} else if sc, ok := contents["singleColumnBrowseResultsRenderer"].(map[string]any); ok {
-		tabs, _ := sc["tabs"].([]any)
-		if len(tabs) > 0 {
-			tab0, _ := tabs[0].(map[string]any)
-			sections, _ := tab0["tabRenderer"].(map[string]any)["content"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
-			rawTracks, continuation = findShelfContents(sections)
-		}
-	}
+	rawTracks, continuation := listShelf(contents)
 
 	for _, item := range rawTracks {
 		appendPlaylistItem(pl, item)
@@ -1079,6 +1067,7 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 							}
 						}
 					}
+					art.SongsID, art.SongsParams = moreEndpoint(shelf)
 				}
 			}
 			// MusicCarouselShelfRenderer (Albums, Singles)
@@ -1127,6 +1116,54 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 	return art, nil
 }
 
+// BrowseArtistSongs loads the complete song list an artist page's songs shelf
+// links to. YouTube Music paginates it like a playlist, so the returned
+// continuation token feeds PlaylistTracks.
+func (c *Client) BrowseArtistSongs(ctx context.Context, browseID, params string) (*Playlist, error) {
+	body := map[string]any{
+		"browseId": browseID,
+	}
+	if params != "" {
+		body["params"] = params
+	}
+	data, err := c.post(ctx, "browse", body, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+
+	pl := &Playlist{ID: browseID}
+	contents, _ := root["contents"].(map[string]any)
+	items, continuation := listShelf(contents)
+	for _, item := range items {
+		appendPlaylistItem(pl, item)
+	}
+	pl.Continuation = continuation
+	if continuation == "" {
+		pl.TrackCount = len(pl.Tracks)
+	}
+	return pl, nil
+}
+
+// moreEndpoint reads the "see all" link of a shelf: the bottom endpoint on a
+// song shelf, or the more button on carousels.
+func moreEndpoint(shelf map[string]any) (id, params string) {
+	endpoint, _ := shelf["bottomEndpoint"].(map[string]any)
+	if endpoint == nil {
+		button, _ := shelf["moreContentButton"].(map[string]any)
+		renderer, _ := button["buttonRenderer"].(map[string]any)
+		endpoint, _ = renderer["navigationEndpoint"].(map[string]any)
+	}
+	be, _ := endpoint["browseEndpoint"].(map[string]any)
+	id, _ = be["browseId"].(string)
+	params, _ = be["params"].(string)
+	return id, params
+}
+
 // tabSections extracts the section list from a tab renderer.
 func tabSections(raw any) []any {
 	tab, _ := raw.(map[string]any)
@@ -1135,6 +1172,22 @@ func tabSections(raw any) []any {
 	sl, _ := content["sectionListRenderer"].(map[string]any)
 	sections, _ := sl["contents"].([]any)
 	return sections
+}
+
+// listShelf finds the track shelf and its continuation token in a browse
+// response's contents, for both the single- and two-column layouts.
+func listShelf(contents map[string]any) ([]any, string) {
+	if tc, ok := contents["twoColumnBrowseResultsRenderer"].(map[string]any); ok {
+		sec, _ := tc["secondaryContents"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
+		return findShelfContents(sec)
+	}
+	if sc, ok := contents["singleColumnBrowseResultsRenderer"].(map[string]any); ok {
+		tabs, _ := sc["tabs"].([]any)
+		if len(tabs) > 0 {
+			return findShelfContents(tabSections(tabs[0]))
+		}
+	}
+	return nil, ""
 }
 
 func findShelfContents(sections []any) ([]any, string) {

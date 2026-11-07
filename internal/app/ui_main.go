@@ -290,6 +290,8 @@ func (a *app) content(c *ui.Context) {
 		a.viewAlbum(c)
 	case pageArtist:
 		a.viewArtist(c)
+	case pageArtistSongs:
+		a.viewArtistSongs(c)
 	case pageLiked:
 		a.viewLiked(c)
 	case pageCategory:

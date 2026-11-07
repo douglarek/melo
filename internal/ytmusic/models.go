@@ -228,6 +228,11 @@ type Artist struct {
 	Albums      []AlbumItem `json:"albums"`
 	Singles     []AlbumItem `json:"singles"`
 	RadioID     string      `json:"radioId,omitempty"`
+	// SongsID and SongsParams open the artist's complete song list: the
+	// browse endpoint behind the more button of the songs shelf. They are
+	// empty when the artist page has no such shelf.
+	SongsID     string `json:"songsId,omitempty"`
+	SongsParams string `json:"songsParams,omitempty"`
 }
 
 // SearchResult groups results by category.

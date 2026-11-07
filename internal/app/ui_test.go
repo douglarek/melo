@@ -652,6 +652,56 @@ func TestArtistPageUsesVirtualList(t *testing.T) {
 	}
 }
 
+func TestArtistAllSongsOpensTheArtistSongList(t *testing.T) {
+	a := newTestApp(t)
+	a.artists["art-song"] = &ytmusic.Artist{
+		ID:          "art-song",
+		Name:        "古典樂精選",
+		SongsID:     "VLOLAK5uy_songs",
+		SongsParams: "ggMCCAI%3D",
+		TopTracks:   []ytmusic.Track{{ID: "preview1", Title: "月光奏鳴曲"}},
+	}
+	a.playlists[artistSongsKey("art-song")] = &ytmusic.Playlist{
+		ID: "VLOLAK5uy_songs",
+		Tracks: []ytmusic.Track{
+			{ID: "song1", Title: "月光奏鳴曲"},
+			{ID: "song2", Title: "致愛麗絲"},
+		},
+	}
+	a.route = route{page: pageArtist, id: "art-song"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("查看所有歌曲"); err != nil {
+		t.Fatalf("click 查看所有歌曲: %v", err)
+	}
+	tt.Frame()
+
+	// The old behaviour searched YouTube Music for the artist name, which
+	// mixed in other artists' tracks; the button must open the artist's own
+	// song list instead.
+	if a.route.page != pageArtistSongs || a.route.id != "art-song" {
+		t.Fatalf("route = %+v, want the artist songs page", a.route)
+	}
+	for _, text := range []string{"古典樂精選", "共 2 首歌曲", "致愛麗絲"} {
+		if !tt.HasText(text) {
+			t.Fatalf("artist songs page missing %q", text)
+		}
+	}
+}
+
+func TestArtistWithoutSongsShelfHidesAllSongs(t *testing.T) {
+	a := newTestApp(t)
+	a.artists["art-plain"] = &ytmusic.Artist{ID: "art-plain", Name: "Artist"}
+	a.route = route{page: pageArtist, id: "art-plain"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if tt.HasText("查看所有歌曲") {
+		t.Fatal("查看所有歌曲 shown without a song list to open")
+	}
+}
+
 func TestChartsShowsCountrySelector(t *testing.T) {
 	a := newTestApp(t)
 	a.route = route{page: pageCharts}
