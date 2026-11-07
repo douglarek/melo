@@ -12,29 +12,10 @@ Melo 是用 Go 和 [MyGo](https://github.com/egoist/mygo) 实现的第三方 You
 - **播放**：AAC-LC 纯 Go 解码，YouTube 自适应流（AAC 128 kbps，边下边播）/ MP4 / HLS 播放，支持本地缓存、随机 / 循环和音量淡入淡出。
 - **正在播放**：大封面、同步歌词、待播清单和相关推荐。
 - **自动更新**：macOS 与 Windows 版本可在设置里开启，发现新版本提示后下载，重启即完成升级。
-
-## 构建与运行
-
-需要 Go 1.27+。
-
-```bash
-# Linux 必选依赖
-sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 \
-  libgl1-mesa-dri libglx-mesa0 libegl-mesa0
-
-# 测试
-go test ./...
-
-# 编译
-go build .
-
-# 开发模式
-go tool mygo dev
-```
+- **中英双语**：界面跟随系统语言，也可在设置里切换「简体中文 / English」。
 
 ## 致谢
 
-- Gemini-3.8-flash & DeepSeek-V4.1-Flash-1017：氛围编码
 - [MyGo](https://github.com/egoist/mygo)：原生 UI 与桌面应用框架
 - [mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic)：界面结构与设计参考
 - [go-aac](https://github.com/tphakala/go-aac)：纯 Go AAC-LC 解码实现
