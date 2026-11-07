@@ -1021,6 +1021,31 @@ func TestAlbumAndArtistNavigation(t *testing.T) {
 	}
 }
 
+func TestAlbumHeaderArtistOpensArtist(t *testing.T) {
+	a := newTestApp(t)
+	a.albums["al-zhou"] = &ytmusic.Album{
+		ID:      "al-zhou",
+		Title:   "绿豆沙",
+		Year:    "2026年",
+		Artists: []ytmusic.ArtistRef{{ID: "UCzhou", Name: "周传雄"}},
+		// A different name on the track keeps the byline the only 周传雄 on
+		// the page, so the click can only hit the header.
+		Tracks: []ytmusic.Track{{ID: "t1", Title: "绿豆沙", Artists: []ytmusic.ArtistRef{{ID: "UCother", Name: "别的歌手"}}}},
+	}
+	a.artists["UCzhou"] = &ytmusic.Artist{ID: "UCzhou", Name: "周传雄"}
+	a.route = route{page: pageAlbum, id: "al-zhou"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("周传雄"); err != nil {
+		t.Fatalf("click header artist: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageArtist || a.route.id != "UCzhou" {
+		t.Fatalf("header artist opened %+v, want artist UCzhou", a.route)
+	}
+}
+
 func TestAccountAndSettingsModals(t *testing.T) {
 	origOpenWin := openWebLoginWindow
 	defer func() {

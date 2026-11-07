@@ -839,7 +839,9 @@ func (a *app) albumHeader(c *ui.Context, al *ytmusic.Album) {
 				ui.Text(c, "专辑").FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, al.Title).FontSize(28).Bold().TextColor(p.text)
 				if len(al.Artists) > 0 {
-					ui.Text(c, al.Artists[0].Name).FontSize(14).TextColor(p.text)
+					// The byline links like the artist line of every track
+					// below it, opening the artist rather than dead-ending.
+					a.artistByline(c, "album-"+al.ID, al.Artists, 14, p.text, p.text)
 				}
 				if al.Year != "" {
 					ui.Text(c, al.Year).FontSize(12).TextColor(p.muted)
@@ -1204,36 +1206,43 @@ func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur
 }
 
 func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color) ui.Element {
+	return a.artistByline(c, t.ID, t.Artists, 12, color, hover)
+}
+
+// artistByline renders artist names that open the artist's page. Page headers
+// and track rows share it so a name links wherever it appears; key scopes the
+// links within the caller.
+func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRef, size float32, color, hover ui.Color) ui.Element {
 	return ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
-		if len(t.Artists) == 0 {
-			ui.Text(c, "未知音乐人").FontSize(12).TextColor(color)
+		if len(artists) == 0 {
+			ui.Text(c, "未知音乐人").FontSize(size).TextColor(color)
 			return
 		}
 		n := 0
-		for _, ar := range t.Artists {
+		for _, ar := range artists {
 			artist := ar
 			artist.Name = ytmusic.CleanArtistName(artist.Name)
 			if artist.Name == "" {
 				continue
 			}
 			if n > 0 {
-				ui.Text(c, ", ").FontSize(12).TextColor(color)
+				ui.Text(c, ", ").FontSize(size).TextColor(color)
 			}
 			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
 			if artist.ID != "" && strings.HasPrefix(artist.ID, "UC") {
 				r = route{page: pageArtist, id: artist.ID}
 			}
-			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", t.ID, n)), artist.Name, color, hover, r)
+			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", key, n)), artist.Name, size, color, hover, r)
 			n++
 		}
 	})
 }
 
-func (a *app) link(c *ui.Context, text string, color, hover ui.Color, r route) {
+func (a *app) link(c *ui.Context, text string, size float32, color, hover ui.Color, r route) {
 	row := ui.Row(c).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 	var label ui.Element
 	row.Children(func() {
-		label = ui.Text(c, text).FontSize(12).TextColor(color)
+		label = ui.Text(c, text).FontSize(size).TextColor(color)
 	})
 	if row.Hovered() {
 		label.TextColor(hover).Underline()
