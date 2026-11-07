@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"github.com/douglarek/melo/locales"
 	"io"
 	"os"
 	"os/exec"
@@ -129,7 +130,7 @@ func (a *app) notifyLinux(title, body string, icon []byte) bool {
 		"--app-name=Melo",
 		"--urgency=low",
 		"--id-fd=3",
-		"--action=default=打开 Melo",
+		locales.NotificationShowAction(),
 	}
 	if replace != 0 {
 		args = append(args, "--replace-id="+strconv.FormatUint(uint64(replace), 10))

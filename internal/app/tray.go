@@ -2,6 +2,7 @@ package app
 
 import (
 	_ "embed"
+	"github.com/douglarek/melo/locales"
 	"runtime"
 
 	"github.com/egoist/mygo"
@@ -55,24 +56,24 @@ func (a *app) setupTray() {
 // update item names the version a background check found, when there is one.
 func (a *app) trayMenu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{Label: "显示 / 隐藏 Melo", Click: func(*mygo.MenuItem, *mygo.Window) { a.toggleWindow() }},
+		{Label: locales.ShowHideApp(), Click: func(*mygo.MenuItem, *mygo.Window) { a.toggleWindow() }},
 		mygo.Separator(),
-		{Label: "播放 / 暂停", Click: func(*mygo.MenuItem, *mygo.Window) { a.togglePlayback() }},
-		{Label: "上一首", Click: func(*mygo.MenuItem, *mygo.Window) { a.playerPrev() }},
-		{Label: "下一首", Click: func(*mygo.MenuItem, *mygo.Window) { a.playerNext() }},
+		{Label: locales.PlayPauseMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.togglePlayback() }},
+		{Label: locales.Previous(), Click: func(*mygo.MenuItem, *mygo.Window) { a.playerPrev() }},
+		{Label: locales.Next(), Click: func(*mygo.MenuItem, *mygo.Window) { a.playerNext() }},
 		mygo.Separator(),
 		{Label: a.updateMenuLabel(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
 		mygo.Separator(),
-		{Label: "退出 Melo", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+		{Label: locales.QuitApp(), Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	})
 }
 
 // updateMenuLabel names the update item after what a background check found.
 func (a *app) updateMenuLabel() string {
 	if v := a.settings.UpdateAvailable; v != "" {
-		return "更新到 " + v + "…"
+		return locales.UpdateToPrefix() + v + "…"
 	}
-	return "检查更新…"
+	return locales.CheckForUpdatesMenu()
 }
 
 // refreshTray points the tooltip, and on Linux the menu, at a version a
@@ -83,7 +84,7 @@ func (a *app) refreshTray() {
 	}
 	tip := "Melo"
 	if v := a.settings.UpdateAvailable; v != "" {
-		tip = "Melo " + v + " 可以更新"
+		tip = "Melo " + v + locales.IsAvailableSuffix()
 	}
 	a.tray.SetToolTip(tip)
 	if runtime.GOOS == "linux" {

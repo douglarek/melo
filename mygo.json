@@ -2,7 +2,7 @@
   "name": "Melo",
   "identifier": "vibe.melo",
   "slug": "melo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "out": "build",
   "icon": "resources/icon.png",
   "resources": [
@@ -21,7 +21,14 @@
   },
   "linux": {
     "comment": "Third-party YouTube Music desktop client",
-    "categories": ["AudioVideo", "Audio", "Player"],
+    "categories": [
+      "Audio",
+      "Player"
+    ],
     "webview": true
+  },
+  "i18n": {
+    "dir": "locales",
+    "source": "zh-Hans"
   }
 }

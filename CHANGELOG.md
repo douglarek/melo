@@ -3,6 +3,15 @@
 Melo 的版本说明。更新窗口显示的说明就是当前版本这一节的内容：`mygo build` 把它写进
 更新清单，见 [updates](https://github.com/egoist/mygo/blob/main/docs/updates.md)。
 
+## [0.3.0] - 2026-11-07
+
+### 新增
+
+- **中英双语**：界面文字改成中文、英文两套（`locales/` 下的 mygo 词条表），跟随系统语言，
+  也可以在「设置 → 语言」里固定为「简体中文」或「English」。菜单、托盘菜单、桌面通知、
+  托盘提示和更新窗口都跟着切换。
+- Linux 桌面分类去掉 `AudioVideo`，只留 `Audio`、`Player`：音乐视频已经不再支持。
+
 ## [0.2.0] - 2026-11-07
 
 这是第一个打 tag 的版本，也是第一个能自己更新的版本：装了它的 macOS 和 Windows 用户，

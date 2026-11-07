@@ -5,6 +5,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -15,14 +17,14 @@ func (a *app) searchFilters(c *ui.Context, r route) {
 			label string
 			kind  ytmusic.SearchType
 		}{
-			{"全部", ytmusic.SearchAll},
-			{"歌曲", ytmusic.SearchSongs},
-			{"视频", ytmusic.SearchVideos},
-			{"专辑", ytmusic.SearchAlbums},
-			{"音乐人", ytmusic.SearchArtists},
-			{"歌单", ytmusic.SearchPlaylists},
-			{"播客", ytmusic.SearchPodcasts},
-			{"分集", ytmusic.SearchPodcastEpisodes},
+			{locales.All(), ytmusic.SearchAll},
+			{locales.Songs(), ytmusic.SearchSongs},
+			{locales.Videos(), ytmusic.SearchVideos},
+			{locales.Albums(), ytmusic.SearchAlbums},
+			{locales.Artists(), ytmusic.SearchArtists},
+			{locales.Playlists(), ytmusic.SearchPlaylists},
+			{locales.Podcasts(), ytmusic.SearchPodcasts},
+			{locales.Episodes(), ytmusic.SearchPodcastEpisodes},
 		}
 
 		for _, cat := range categories {
@@ -59,12 +61,12 @@ func (a *app) searchTrackList(c *ui.Context, r route, res *ytmusic.SearchResult)
 
 	ui.List(c, a.trackListState(key), count).Fill().Gap(2).Rows(func(row ui.ListRow) {
 		if row.Index == 0 {
-			title := "歌曲"
+			title := locales.Songs()
 			switch r.kind {
 			case ytmusic.SearchVideos:
-				title = "视频"
+				title = locales.Videos()
 			case ytmusic.SearchPodcastEpisodes:
-				title = "分集"
+				title = locales.Episodes()
 			}
 			ui.Column(row.Context).FillWidth().Gap(20).Padding(0, 0, 12, 0).Children(func() {
 				a.searchFilters(row.Context, r)
@@ -94,7 +96,7 @@ func (a *app) viewSearch(c *ui.Context) {
 		if res == nil {
 			ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
 				ui.Spinner(c)
-				ui.Text(c, fmt.Sprintf("正在搜索「%s」...", r.query)).FontSize(14).TextColor(p.muted)
+				ui.Text(c, fmt.Sprintf(locales.SearchingFor(), r.query)).FontSize(14).TextColor(p.muted)
 			})
 			return
 		}
@@ -103,17 +105,17 @@ func (a *app) viewSearch(c *ui.Context) {
 		hasResults := len(res.Tracks) > 0 || len(res.Artists) > 0 || len(res.Albums) > 0 || len(res.Playlists) > 0 || len(res.Podcasts) > 0
 		if !hasResults {
 			ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
-				ui.Text(c, "未找到相关结果").FontSize(16).Bold().TextColor(p.muted)
-				ui.Text(c, "请尝试使用其他关键词搜索").FontSize(13).TextColor(p.faint)
+				ui.Text(c, locales.NoResultsFound()).FontSize(16).Bold().TextColor(p.muted)
+				ui.Text(c, locales.TryOtherWords()).FontSize(13).TextColor(p.faint)
 			})
 			return
 		}
 
 		// Tracks
 		if len(res.Tracks) > 0 {
-			title := "歌曲"
+			title := locales.Songs()
 			if r.kind == ytmusic.SearchPodcastEpisodes {
-				title = "分集"
+				title = locales.Episodes()
 			}
 			ui.Text(c, title).FontSize(18).Bold().TextColor(p.text)
 			a.renderTrackTable(c, res.Tracks)
@@ -132,7 +134,7 @@ func (a *app) viewSearch(c *ui.Context) {
 					Type:      "artist",
 				}
 			}
-			a.renderSection(c, searchKey+"-artists", ytmusic.Section{Title: "音乐人", Items: items})
+			a.renderSection(c, searchKey+"-artists", ytmusic.Section{Title: locales.Artists(), Items: items})
 		}
 
 		// Albums
@@ -147,7 +149,7 @@ func (a *app) viewSearch(c *ui.Context) {
 					Type:      "album",
 				}
 			}
-			a.renderSection(c, searchKey+"-albums", ytmusic.Section{Title: "专辑", Items: items})
+			a.renderSection(c, searchKey+"-albums", ytmusic.Section{Title: locales.Albums(), Items: items})
 		}
 
 		// Playlists
@@ -162,12 +164,12 @@ func (a *app) viewSearch(c *ui.Context) {
 					Type:      "playlist",
 				}
 			}
-			a.renderSection(c, searchKey+"-playlists", ytmusic.Section{Title: "歌单", Items: items})
+			a.renderSection(c, searchKey+"-playlists", ytmusic.Section{Title: locales.Playlists(), Items: items})
 		}
 
 		// Podcast shows
 		if len(res.Podcasts) > 0 {
-			a.renderSection(c, searchKey+"-podcasts", ytmusic.Section{Title: "播客", Items: res.Podcasts})
+			a.renderSection(c, searchKey+"-podcasts", ytmusic.Section{Title: locales.Podcasts(), Items: res.Podcasts})
 		}
 	})
 }

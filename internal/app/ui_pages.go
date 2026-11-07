@@ -7,6 +7,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -16,7 +18,7 @@ func (a *app) viewHome(c *ui.Context) {
 	if a.homeLoading && len(a.homeSections) == 0 {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载音乐推荐...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingRecommendations()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -34,7 +36,7 @@ func (a *app) viewExplore(c *ui.Context) {
 	if a.exploreLoading && len(a.exploreSections) == 0 {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在探索新音乐...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.ExploringNewMusic()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -52,7 +54,7 @@ func (a *app) viewCategory(c *ui.Context) {
 	if cat == nil {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载分类...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingCategories()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -76,14 +78,14 @@ func (a *app) viewCharts(c *ui.Context) {
 	if a.chartsLoading && len(a.chartsSections) == 0 {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载热门排行榜...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingTheCharts()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
 
 	ui.Column(c).FillWidth().Gap(28).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(16).Children(func() {
-			ui.Text(c, "排行榜").FontSize(28).Bold().TextColor(p.text)
+			ui.Text(c, locales.Charts()).FontSize(28).Bold().TextColor(p.text)
 			ui.Spacer(c)
 			if len(a.chartCountries) > 0 {
 				a.chartCountrySelector(c)
@@ -97,7 +99,7 @@ func (a *app) viewCharts(c *ui.Context) {
 
 func (a *app) chartCountrySelector(c *ui.Context) {
 	p := a.pal
-	selectedName := "选择国家/地区"
+	selectedName := locales.ChooseACountry()
 	for _, country := range a.chartCountries {
 		if country.Code == a.chartCountry {
 			selectedName = country.Name
@@ -106,7 +108,7 @@ func (a *app) chartCountrySelector(c *ui.Context) {
 	}
 
 	sel := ui.SelectBase(c.Key("chart-country"), &a.chartCountry)
-	sel.Trigger.Label("选择国家/地区").Height(34).Radius(17).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
+	sel.Trigger.Label(locales.ChooseACountry()).Height(34).Radius(17).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
 	sel.Trigger.Children(func() {
 		ui.Text(c, selectedName).FontSize(13).TextColor(p.text)
 		ui.Icon(c, iconChevron).Size(12, 12).TextColor(p.muted)
@@ -260,7 +262,7 @@ func (a *app) viewLibrary(c *ui.Context) {
 		if a.libraryLoading && len(a.libraryPlaylists) == 0 {
 			ui.Column(c).FillWidth().Height(220).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
 				ui.Spinner(c)
-				ui.Text(c, "正在同步媒体库...").FontSize(13).TextColor(p.muted)
+				ui.Text(c, locales.SyncingYourLibrary()).FontSize(13).TextColor(p.muted)
 			})
 			return
 		}
@@ -271,7 +273,7 @@ func (a *app) viewLibrary(c *ui.Context) {
 		case "all", "playlists", "albums", "artists", "profile", "podcasts":
 			a.libraryGrid(c)
 		default:
-			a.libraryEmpty(c, "暂无内容")
+			a.libraryEmpty(c, locales.NothingHereYet())
 		}
 	})
 }
@@ -282,13 +284,13 @@ func (a *app) libraryFilters(c *ui.Context) {
 		key   string
 		label string
 	}{
-		{"all", "全部"},
-		{"playlists", "播放列表"},
-		{"songs", "歌曲"},
-		{"albums", "专辑"},
-		{"artists", "音乐人"},
-		{"profile", "个人资料"},
-		{"podcasts", "播客"},
+		{"all", locales.All()},
+		{"playlists", locales.Playlist()},
+		{"songs", locales.Songs()},
+		{"albums", locales.Albums()},
+		{"artists", locales.Artists()},
+		{"profile", locales.Profile()},
+		{"podcasts", locales.Podcasts()},
 	}
 
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
@@ -310,7 +312,7 @@ func (a *app) libraryFilters(c *ui.Context) {
 		ui.Spacer(c)
 		sort := ui.Row(c.Key("lib-sort")).Height(30).Radius(15).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
 		sort.Children(func() {
-			ui.Text(c, "近期活动").FontSize(12.5).TextColor(p.text)
+			ui.Text(c, locales.RecentActivity()).FontSize(12.5).TextColor(p.text)
 			ui.Icon(c, iconChevron).Size(12, 12).TextColor(p.muted)
 		})
 	})
@@ -320,15 +322,15 @@ func (a *app) libraryGrid(c *ui.Context) {
 	items := a.libraryFilterItems()
 	if len(items) == 0 {
 		labels := map[string]string{
-			"playlists": "暂无播放列表",
-			"albums":    "暂无专辑",
-			"artists":   "暂无音乐人",
-			"profile":   "暂无个人资料",
-			"podcasts":  "暂无播客",
+			"playlists": locales.NoPlaylistsYet(),
+			"albums":    locales.NoAlbumsYet(),
+			"artists":   locales.NoArtistsYet(),
+			"profile":   locales.NoProfileYet(),
+			"podcasts":  locales.NoPodcastsYet(),
 		}
 		text := labels[a.libraryFilter]
 		if text == "" {
-			text = "暂无内容"
+			text = locales.NothingHereYet()
 		}
 		a.libraryEmpty(c, text)
 		return
@@ -359,8 +361,8 @@ func (a *app) libraryFilterItems() []ytmusic.CardItem {
 	if a.libraryFilter == "all" || a.libraryFilter == "playlists" {
 		items = append(items, ytmusic.CardItem{
 			ID:       "LM",
-			Title:    "赞过的音乐",
-			Subtitle: "自动播放列表",
+			Title:    locales.LikedMusicCached(),
+			Subtitle: locales.AutoPlaylist(),
 			Type:     "playlist",
 		})
 	}
@@ -398,7 +400,7 @@ func (a *app) libraryFilterItems() []ytmusic.CardItem {
 		return items
 	}
 	for _, pl := range a.libraryPlaylists {
-		subtitle := "播放列表"
+		subtitle := locales.Playlist()
 		if pl.Author != "" {
 			subtitle += " • " + pl.Author
 		}
@@ -419,7 +421,7 @@ func (a *app) libraryFilterItems() []ytmusic.CardItem {
 func (a *app) librarySongs(c *ui.Context) {
 	tracks := a.likedTracks()
 	if len(tracks) == 0 {
-		a.libraryEmpty(c, "暂无歌曲")
+		a.libraryEmpty(c, locales.NoSongsYet())
 		return
 	}
 
@@ -504,7 +506,7 @@ func (a *app) sectionHeader(c *ui.Context, key, title string, prevOn, nextOn boo
 		ui.Spacer(c)
 
 		moreBtn := ui.Row(c.Key("sec-more-"+key)).Height(30).Padding(0, 14).Radius(15).Background(p.card).AlignItems(ui.Center).Cursor(ui.CursorPointer)
-		moreBtn.Label("更多")
+		moreBtn.Label(locales.More())
 		if moreBtn.Hovered() {
 			moreBtn.Background(p.hover)
 		}
@@ -512,7 +514,7 @@ func (a *app) sectionHeader(c *ui.Context, key, title string, prevOn, nextOn boo
 			more()
 		}
 		moreBtn.Children(func() {
-			ui.Text(c, "更多").FontSize(12).TextColor(p.text)
+			ui.Text(c, locales.More()).FontSize(12).TextColor(p.text)
 		})
 
 		arrow := func(label string, suffix string, icon *ui.SVG, on bool, fn func()) {
@@ -532,8 +534,8 @@ func (a *app) sectionHeader(c *ui.Context, key, title string, prevOn, nextOn boo
 				ui.Icon(c, icon).Size(14, 14).TextColor(p.text)
 			})
 		}
-		arrow("上一页", "prev", iconBack, prevOn, prev)
-		arrow("下一页", "next", iconForward, nextOn, next)
+		arrow(locales.PreviousPage(), "prev", iconBack, prevOn, prev)
+		arrow(locales.NextPage(), "next", iconForward, nextOn, next)
 	})
 }
 
@@ -580,7 +582,7 @@ func (a *app) viewSection(c *ui.Context) {
 	sec, ok := a.more[a.route.id]
 	if !ok {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-			ui.Text(c, "内容不可用").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.NotAvailable()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -625,7 +627,7 @@ func (a *app) renderMoodGrid(c *ui.Context, items []ytmusic.CardItem, limit int)
 					a.open(route{page: pageCategory, id: item.ID, params: item.Params})
 				}
 				pill.ContextMenu(func(m *ui.Menu) {
-					if m.Item("复制名称").Chosen() {
+					if m.Item(locales.CopyName()).Chosen() {
 						c.WriteClipboard(item.Title)
 					}
 				})
@@ -716,7 +718,7 @@ func (a *app) viewPlaylist(c *ui.Context) {
 	if pl == nil {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载歌单...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -755,10 +757,10 @@ func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmus
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.playlistCover(c, pl, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
-				ui.Text(c, "歌单").FontSize(12).Bold().TextColor(p.accent)
+				ui.Text(c, locales.Playlists()).FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, pl.Title).FontSize(28).Bold().TextColor(p.text)
 				if pl.Author != "" {
-					ui.Text(c, "创建者："+pl.Author).FontSize(13).TextColor(p.muted)
+					ui.Text(c, locales.CreatedByPrefix()+pl.Author).FontSize(13).TextColor(p.muted)
 				}
 				if pl.Description != "" {
 					ui.Text(c, pl.Description).FontSize(12).TextColor(p.faint).MaxLines(2).Tooltip(pl.Description)
@@ -775,7 +777,7 @@ func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmus
 					if total < len(tracks) {
 						total = len(tracks)
 					}
-					ui.Text(c, fmt.Sprintf("播放全部 (%d 首)", total)).FontSize(13).Bold().TextColor(p.onAccent)
+					ui.Text(c, fmt.Sprintf(locales.PlayAllCount(), total)).FontSize(13).Bold().TextColor(p.onAccent)
 				})
 			})
 		})
@@ -801,9 +803,9 @@ func (a *app) playlistMoreFooter(c *ui.Context, key string) {
 	ui.Row(c).FillWidth().Height(44).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
 		if a.loadingMore[key] {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载更多...").FontSize(12).TextColor(p.muted)
+			ui.Text(c, locales.LoadingMore()).FontSize(12).TextColor(p.muted)
 		} else {
-			ui.Text(c, "继续向下滚动加载更多").FontSize(12).TextColor(p.faint)
+			ui.Text(c, locales.LoadMoreHint()).FontSize(12).TextColor(p.faint)
 		}
 	})
 }
@@ -814,7 +816,7 @@ func (a *app) viewAlbum(c *ui.Context) {
 		p := a.pal
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载专辑...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingTheAlbum()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -836,7 +838,7 @@ func (a *app) albumHeader(c *ui.Context, al *ytmusic.Album) {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.coverImage(c, al.Thumbnail, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
-				ui.Text(c, "专辑").FontSize(12).Bold().TextColor(p.accent)
+				ui.Text(c, locales.Albums()).FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, al.Title).FontSize(28).Bold().TextColor(p.text)
 				if len(al.Artists) > 0 {
 					// The byline links like the artist line of every track
@@ -854,7 +856,7 @@ func (a *app) albumHeader(c *ui.Context, al *ytmusic.Album) {
 				}
 				playAllBtn.Children(func() {
 					ui.Icon(c, iconPlay).Size(16, 16).TextColor(p.onAccent)
-					ui.Text(c, fmt.Sprintf("播放专辑 (%d 首)", len(al.Tracks))).FontSize(13).Bold().TextColor(p.onAccent)
+					ui.Text(c, fmt.Sprintf(locales.PlayAlbumCount(), len(al.Tracks))).FontSize(13).Bold().TextColor(p.onAccent)
 				})
 			})
 		})
@@ -867,7 +869,7 @@ func (a *app) viewArtist(c *ui.Context) {
 		p := a.pal
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载音乐人资料...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingTheArtist()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -916,7 +918,7 @@ func (a *app) artistHeader(c *ui.Context, art *ytmusic.Artist) {
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
 				ui.Text(c, art.Name).FontSize(32).Bold().TextColor(p.text)
 				if art.Subscribers != "" {
-					ui.Text(c, art.Subscribers+" 订阅者").FontSize(13).TextColor(p.muted)
+					ui.Text(c, art.Subscribers+locales.SubscribersSuffix()).FontSize(13).TextColor(p.muted)
 				}
 				// The shelf's more button is the only way to the artist's
 				// complete song list; without it there is nothing to show.
@@ -927,13 +929,13 @@ func (a *app) artistHeader(c *ui.Context, art *ytmusic.Artist) {
 					}
 					allSongsBtn.Children(func() {
 						ui.Icon(c, iconMusic).Size(14, 14).TextColor(p.text)
-						ui.Text(c, "查看所有歌曲").FontSize(12).Bold().TextColor(p.text)
+						ui.Text(c, locales.SeeAllSongs()).FontSize(12).Bold().TextColor(p.text)
 					})
 				}
 			})
 		})
 		if len(art.TopTracks) > 0 {
-			ui.Text(c, "热门歌曲").FontSize(18).Bold().TextColor(p.text)
+			ui.Text(c, locales.PopularSongs()).FontSize(18).Bold().TextColor(p.text)
 		}
 	})
 }
@@ -950,7 +952,7 @@ func (a *app) artistAlbumsSection(c *ui.Context, art *ytmusic.Artist) {
 			Track:     al.Track,
 		}
 	}
-	a.renderSection(c, "artist-albums-"+art.ID, ytmusic.Section{Title: "专辑", Items: items})
+	a.renderSection(c, "artist-albums-"+art.ID, ytmusic.Section{Title: locales.Albums(), Items: items})
 }
 
 func (a *app) artistSinglesSection(c *ui.Context, art *ytmusic.Artist) {
@@ -965,7 +967,7 @@ func (a *app) artistSinglesSection(c *ui.Context, art *ytmusic.Artist) {
 			Track:     sg.Track,
 		}
 	}
-	a.renderSection(c, "artist-singles-"+art.ID, ytmusic.Section{Title: "单曲与迷你专辑", Items: items})
+	a.renderSection(c, "artist-singles-"+art.ID, ytmusic.Section{Title: locales.SinglesAndEPs(), Items: items})
 }
 
 // viewArtistSongs shows the song list behind an artist page. The shelf on the
@@ -979,7 +981,7 @@ func (a *app) viewArtistSongs(c *ui.Context) {
 	if pl == nil {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载歌曲...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.LoadingSongs()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
@@ -988,7 +990,7 @@ func (a *app) viewArtistSongs(c *ui.Context) {
 	if len(tracks) == 0 && !a.loadingMore[key] {
 		ui.Column(c).FillWidth().Gap(20).Children(func() {
 			a.artistSongsHeader(c, id, key, pl, tracks)
-			a.libraryEmpty(c, "暂无歌曲")
+			a.libraryEmpty(c, locales.NoSongsYet())
 		})
 		return
 	}
@@ -1019,14 +1021,14 @@ func (a *app) artistSongsHeader(c *ui.Context, artistID, key string, pl *ytmusic
 		name, cover = art.Name, art.Thumbnail
 	}
 	if name == "" {
-		name = "全部歌曲"
+		name = locales.AllSongs()
 	}
 
 	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.coverImage(c, cover, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
-				ui.Text(c, "音乐人").FontSize(12).Bold().TextColor(p.accent)
+				ui.Text(c, locales.Artists()).FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, name).FontSize(28).Bold().TextColor(p.text)
 				ui.Text(c, artistSongsCount(len(tracks), pl.Continuation != "")).FontSize(13).TextColor(p.muted)
 				playAllBtn := ui.Row(c.Key("artist-songs-play-all")).AlignSelf(ui.Start).Height(36).Radius(18).Background(p.accent).Padding(0, 18).AlignItems(ui.Center).Gap(8).Cursor(ui.CursorPointer)
@@ -1037,7 +1039,7 @@ func (a *app) artistSongsHeader(c *ui.Context, artistID, key string, pl *ytmusic
 				}
 				playAllBtn.Children(func() {
 					ui.Icon(c, iconPlay).Size(16, 16).TextColor(p.onAccent)
-					ui.Text(c, fmt.Sprintf("播放全部 (%d 首)", len(tracks))).FontSize(13).Bold().TextColor(p.onAccent)
+					ui.Text(c, fmt.Sprintf(locales.PlayAllCount(), len(tracks))).FontSize(13).Bold().TextColor(p.onAccent)
 				})
 			})
 		})
@@ -1048,9 +1050,9 @@ func (a *app) artistSongsHeader(c *ui.Context, artistID, key string, pl *ytmusic
 // endpoint answers a page at a time until its continuation runs dry.
 func artistSongsCount(loaded int, more bool) string {
 	if more {
-		return fmt.Sprintf("已加载 %d 首歌曲", loaded)
+		return fmt.Sprintf(locales.SongsLoaded(), loaded)
 	}
-	return fmt.Sprintf("共 %d 首歌曲", loaded)
+	return fmt.Sprintf(locales.SongCount(), loaded)
 }
 
 func (a *app) viewLiked(c *ui.Context) {
@@ -1095,8 +1097,8 @@ func (a *app) likedHeader(c *ui.Context, likedPlaylist *ytmusic.Playlist, tracks
 				ui.Icon(c, iconHeartFill).Size(48, 48).TextColor(p.onAccent)
 			})
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, "我喜欢的音乐").FontSize(28).Bold().TextColor(p.text)
-				ui.Text(c, fmt.Sprintf("共 %d 首歌曲", total)).FontSize(13).TextColor(p.muted)
+				ui.Text(c, locales.LikedMusic()).FontSize(28).Bold().TextColor(p.text)
+				ui.Text(c, fmt.Sprintf(locales.SongCount(), total)).FontSize(13).TextColor(p.muted)
 				if len(tracks) > 0 {
 					playAllBtn := ui.Row(c.Key("liked-play-all")).AlignSelf(ui.Start).Height(34).Radius(17).Background(p.accent).Padding(0, 16).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
 					if playAllBtn.Clicked() {
@@ -1108,7 +1110,7 @@ func (a *app) likedHeader(c *ui.Context, likedPlaylist *ytmusic.Playlist, tracks
 					}
 					playAllBtn.Children(func() {
 						ui.Icon(c, iconPlay).Size(14, 14).TextColor(p.onAccent)
-						ui.Text(c, "播放全部").FontSize(12).Bold().TextColor(p.onAccent)
+						ui.Text(c, locales.PlayAll()).FontSize(12).Bold().TextColor(p.onAccent)
 					})
 				}
 			})
@@ -1121,13 +1123,13 @@ func (a *app) likedEmpty(c *ui.Context) {
 	if a.profile != nil && a.libraryLoading {
 		ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在从 YouTube 同步我喜欢的音乐...").FontSize(14).TextColor(p.muted)
+			ui.Text(c, locales.SyncingLikedMusicFromYouTube()).FontSize(14).TextColor(p.muted)
 		})
 		return
 	}
 	ui.Column(c).FillWidth().Height(200).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
-		ui.Text(c, "暂无喜欢的音乐").FontSize(15).Bold().TextColor(p.muted)
-		ui.Text(c, "在播放歌曲时点击红心，或登录后同步 YouTube 媒体库").FontSize(13).TextColor(p.faint)
+		ui.Text(c, locales.NoLikedMusicYet()).FontSize(15).Bold().TextColor(p.muted)
+		ui.Text(c, locales.LikedEmptyHint()).FontSize(13).TextColor(p.faint)
 	})
 }
 
@@ -1179,9 +1181,9 @@ func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur
 
 		// Like button
 		liked := a.isLiked(t.ID)
-		likeLabel := "喜欢 " + t.Title
+		likeLabel := locales.LikePrefix() + t.Title
 		if liked {
-			likeLabel = "取消喜欢 " + t.Title
+			likeLabel = locales.UnlikePrefix() + t.Title
 		}
 		likeBtn := ui.Box(c.Key(fmt.Sprintf("like-row-%d", idx))).Label(likeLabel).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
 		if likeBtn.Clicked() {
@@ -1215,7 +1217,7 @@ func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color)
 func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRef, size float32, color, hover ui.Color) ui.Element {
 	return ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
 		if len(artists) == 0 {
-			ui.Text(c, "未知音乐人").FontSize(size).TextColor(color)
+			ui.Text(c, locales.UnknownArtist()).FontSize(size).TextColor(color)
 			return
 		}
 		n := 0

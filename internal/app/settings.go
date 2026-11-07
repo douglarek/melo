@@ -15,6 +15,9 @@ type settings struct {
 	CacheMB            int64    `json:"cacheMB"`
 	CloseToTray        bool     `json:"closeToTray"`
 	TrackNotifications bool     `json:"trackNotifications"`
+	// Language is the language Melo shows: "" follows the system's, or a
+	// tag of those it is written in ("zh-Hans", "en").
+	Language string `json:"language,omitempty"`
 	// CheckUpdates reports whether Melo looks for new versions in the
 	// background, and points at them in the sidebar and the tray. It is
 	// off by default: the .deb and the RPM are updated by the package

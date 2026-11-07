@@ -2,6 +2,8 @@ package app
 
 import (
 	"github.com/egoist/mygo/ui"
+
+	"github.com/douglarek/melo/locales"
 )
 
 const sidebarWidth = 220
@@ -138,14 +140,14 @@ func (a *app) sidebar(c *ui.Context) {
 				})
 			}
 
-			navItem("首页", iconHome, pageHome)
-			navItem("探索", iconExplore, pageExplore)
-			navItem("媒体库", iconLibrary, pageLibrary)
+			navItem(locales.Home(), iconHome, pageHome)
+			navItem(locales.Explore(), iconExplore, pageExplore)
+			navItem(locales.Library(), iconLibrary, pageLibrary)
 
 			// User's playlists
 			if len(a.libraryPlaylists) > 0 {
 				ui.Box(c).Height(10)
-				ui.Text(c, "我的歌单").FontSize(11.5).Bold().TextColor(p.faint).Margin(0, 12, 6, 12)
+				ui.Text(c, locales.MyPlaylists()).FontSize(11.5).Bold().TextColor(p.faint).Margin(0, 12, 6, 12)
 				for _, pl := range a.libraryPlaylists {
 					item := pl
 					active := a.route.page == pagePlaylist && a.route.id == item.ID
@@ -173,7 +175,7 @@ func (a *app) sidebar(c *ui.Context) {
 			} else if a.profile != nil && a.libraryLoading {
 				ui.Row(c).Padding(6, 12).AlignItems(ui.Center).Gap(8).Children(func() {
 					ui.Spinner(c)
-					ui.Text(c, "正在同步歌单...").FontSize(11).TextColor(p.muted)
+					ui.Text(c, locales.SyncingPlaylists()).FontSize(11).TextColor(p.muted)
 				})
 			}
 		})
@@ -190,11 +192,11 @@ func (a *app) sidebar(c *ui.Context) {
 		}
 
 		if a.profile == nil {
-			userRow.Label("登录").Children(func() {
+			userRow.Label(locales.SignIn()).Children(func() {
 				ui.Box(c).Size(28, 28).Radius(14).Background(p.card).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 					ui.Icon(c, iconUser).Size(16, 16).TextColor(p.muted)
 				})
-				ui.Text(c, "登录 Google 账号").FontSize(13).TextColor(p.muted)
+				ui.Text(c, locales.SignInWithGoogle()).FontSize(13).TextColor(p.muted)
 			})
 			if userRow.Clicked() {
 				a.openLogin()
@@ -226,7 +228,7 @@ func (a *app) sidebar(c *ui.Context) {
 // opens the update window, which checks again and offers to install it.
 func (a *app) updateBadge(c *ui.Context) {
 	p := a.pal
-	badge := ui.Row(c.Key("sidebar-update")).FillWidth().Height(28).Radius(8).Background(p.card).Padding(0, 10).AlignItems(ui.Center).Gap(7).Cursor(ui.CursorPointer).Tooltip("有可用更新，点击查看")
+	badge := ui.Row(c.Key("sidebar-update")).FillWidth().Height(28).Radius(8).Background(p.card).Padding(0, 10).AlignItems(ui.Center).Gap(7).Cursor(ui.CursorPointer).Tooltip(locales.UpdateBadgeTooltip())
 	if badge.Hovered() {
 		badge.Background(p.press)
 	}
@@ -235,7 +237,7 @@ func (a *app) updateBadge(c *ui.Context) {
 	}
 	badge.Children(func() {
 		ui.Box(c).Size(6, 6).Radius(3).Background(p.accent)
-		ui.Text(c, "有更新 "+a.settings.UpdateAvailable).FontSize(12).TextColor(p.accent).SingleLine()
+		ui.Text(c, locales.UpdateBadgePrefix()+a.settings.UpdateAvailable).FontSize(12).TextColor(p.accent).SingleLine()
 	})
 }
 
@@ -281,7 +283,7 @@ func (a *app) header(c *ui.Context) {
 		searchWrap := ui.Row(c.Key("search-bar")).Width(360).Height(36).Radius(18).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Gap(8)
 		searchWrap.Children(func() {
 			ui.Icon(c, iconSearch).Size(16, 16).TextColor(p.muted)
-			input := ui.TextInput(c, &a.searchQuery).Bind(&a.searchBox).Grow(1).Placeholder("搜索歌曲、专辑、音乐人、播客").Background(ui.Transparent)
+			input := ui.TextInput(c, &a.searchQuery).Bind(&a.searchBox).Grow(1).Placeholder(locales.SearchPlaceholder()).Background(ui.Transparent)
 			input.BorderWidth(0).TextColor(p.text).FontSize(13)
 			if input.Submitted() {
 				a.search(a.searchQuery)

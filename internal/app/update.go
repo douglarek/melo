@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"github.com/douglarek/melo/locales"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -22,9 +23,9 @@ import (
 // instead.
 func useUpdatePlugin() {
 	mygo.Use(native.New(updater.Options{
-		// The interface is Chinese, so the window follows it rather than
-		// the system's language.
-		Language: "zh-Hans",
+		// Whatever Melo shows: the window speaks the app's language, which
+		// follows the user's or the setting.
+		Language: "",
 		// The window checks when the user asks to, and never in the
 		// background: see updateLoop.
 		DisableAutomaticChecks: true,
@@ -198,19 +199,19 @@ func (a *app) checkUpdates() {
 // versionLabel names the running version for the settings page.
 func (a *app) versionLabel() string {
 	if a.update.version == "" {
-		return "开发版本"
+		return locales.DevelopmentBuild()
 	}
-	return "版本 " + a.update.version
+	return locales.VersionPrefix() + a.update.version
 }
 
 // updateStatusLine summarizes the last check for the settings page.
 func (a *app) updateStatusLine() string {
 	switch {
 	case a.settings.UpdateAvailable != "":
-		return "新版本 " + a.settings.UpdateAvailable + " 可用"
+		return locales.NewVersionPrefix() + a.settings.UpdateAvailable + locales.IsAvailableWordSuffix()
 	case a.settings.UpdateLastCheck.IsZero():
-		return "尚未检查更新"
+		return locales.NotCheckedYet()
 	default:
-		return "上次检查：" + a.settings.UpdateLastCheck.Local().Format("2006-01-02 15:04")
+		return locales.LastCheckedPrefix() + a.settings.UpdateLastCheck.Local().Format("2006-01-02 15:04")
 	}
 }

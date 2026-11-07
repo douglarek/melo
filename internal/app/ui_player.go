@@ -5,6 +5,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/player"
 )
 
@@ -53,9 +55,9 @@ func (a *app) playerBar(c *ui.Context) {
 
 				// Like button
 				liked := a.isLiked(cur.ID)
-				likeLabel := "喜欢 " + cur.Title
+				likeLabel := locales.LikePrefix() + cur.Title
 				if liked {
-					likeLabel = "取消喜欢 " + cur.Title
+					likeLabel = locales.UnlikePrefix() + cur.Title
 				}
 				likeBtn := ui.Box(c.Key("player-like-btn")).Label(likeLabel).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
 				if likeBtn.Hovered() {
@@ -110,9 +112,9 @@ func (a *app) playerBar(c *ui.Context) {
 				})
 
 				// Play/Pause
-				playLabel := "播放"
+				playLabel := locales.Play()
 				if active {
-					playLabel = "暂停"
+					playLabel = locales.Pause()
 				}
 				playBtn := ui.Box(c.Key("ctl-play-pause")).Label(playLabel).Size(34, 34).Radius(17).Background(p.text).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
 				if playBtn.Hovered() {
@@ -177,7 +179,7 @@ func (a *app) playerBar(c *ui.Context) {
 				if loading {
 					ui.Row(c).Grow(1).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
 						ui.Spinner(c)
-						ui.Text(c, "加载中...").FontSize(11).TextColor(p.muted)
+						ui.Text(c, locales.Loading()).FontSize(11).TextColor(p.muted)
 					})
 				} else {
 					slider := ui.Slider(c, &posSec, 0, durSec).Grow(1)
@@ -206,7 +208,7 @@ func (a *app) playerBar(c *ui.Context) {
 			}
 
 			// Queue Button
-			queueBtn := ui.Box(c.Key("ctl-queue-btn")).Label("打开播放队列").Size(28, 28).Radius(14).
+			queueBtn := ui.Box(c.Key("ctl-queue-btn")).Label(locales.OpenTheQueue()).Size(28, 28).Radius(14).
 				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
 			if queueBtn.Hovered() || (a.nowPlayingOpen && a.npPane == paneQueue) {
 				queueBtn.Background(p.hover)
@@ -224,7 +226,7 @@ func (a *app) playerBar(c *ui.Context) {
 			})
 
 			// Lyrics / Now Playing Button
-			npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Label("打开歌词").Size(28, 28).Radius(14).
+			npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Label(locales.OpenTheLyrics()).Size(28, 28).Radius(14).
 				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
 			if a.nowPlayingOpen && a.npPane == paneLyrics {
 				npBtn.Background(p.hover)

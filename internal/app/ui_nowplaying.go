@@ -8,6 +8,8 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -69,11 +71,11 @@ func (a *app) npPanes() []paneKind {
 func npPaneLabel(pane paneKind) string {
 	switch pane {
 	case paneQueue:
-		return "待播清单"
+		return locales.UpNext()
 	case paneRelated:
-		return "相关推荐"
+		return locales.Related()
 	default:
-		return "歌词"
+		return locales.Lyrics()
 	}
 }
 
@@ -270,7 +272,7 @@ func (a *app) npTopBar(c *ui.Context) {
 	// the window would never move (see the sidebar's drag region).
 	bar := ui.Row(c.Key("np-top-bar")).FillWidth().Height(npTopBarHeight).AlignItems(ui.Center).Justify(ui.Center).DragWindow()
 	bar.Children(func() {
-		close := ui.Box(c.Key("np-close")).Label("收起正在播放").Size(34, 34).Radius(17).
+		close := ui.Box(c.Key("np-close")).Label(locales.HideNowPlaying()).Size(34, 34).Radius(17).
 			AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
 		bg := ui.RGBA(255, 255, 255, 0.06)
 		if close.Hovered() {
@@ -308,14 +310,14 @@ func (a *app) npLyricsBadges(c *ui.Context) {
 		badge := ui.Row(c.Key("lyrics-plain")).Padding(2, 8).Radius(6).Background(npWhite.Alpha(0.08)).
 			AlignItems(ui.Center)
 		badge.Children(func() {
-			ui.Text(c, "纯文本歌词").FontSize(11).FontWeight(600).TextColor(npWhite.Alpha(0.5))
+			ui.Text(c, locales.PlainLyrics()).FontSize(11).FontWeight(600).TextColor(npWhite.Alpha(0.5))
 		})
 		return
 	}
 	if !a.npLyricsManual {
 		return
 	}
-	follow := ui.Row(c.Key("lyrics-follow")).Label("跟随播放").Height(28).Radius(14).
+	follow := ui.Row(c.Key("lyrics-follow")).Label(locales.FollowPlayback()).Height(28).Radius(14).
 		Background(npWhite.Alpha(0.12)).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 	if follow.Hovered() {
 		follow.Background(npWhite.Alpha(0.2))
@@ -326,7 +328,7 @@ func (a *app) npLyricsBadges(c *ui.Context) {
 		c.Invalidate()
 	}
 	follow.Children(func() {
-		ui.Text(c, "跟随播放").FontSize(12).TextColor(npWhite)
+		ui.Text(c, locales.FollowPlayback()).FontSize(12).TextColor(npWhite)
 	})
 }
 
@@ -458,16 +460,16 @@ func (a *app) npInfo(c *ui.Context, cur *ytmusic.Track) {
 		})
 		a.npArtists(c, *cur)
 		if a.pl.StreamFallback() {
-			ui.Text(c, "音质已回退至 96 kbps").FontSize(11).TextColor(npWhite.Alpha(0.4))
+			ui.Text(c, locales.AudioFellBackTo96Kbps()).FontSize(11).TextColor(npWhite.Alpha(0.4))
 		}
 	})
 }
 
 func (a *app) npLikeButton(c *ui.Context, t ytmusic.Track) {
 	liked := a.isLiked(t.ID)
-	label := "喜欢 " + t.Title
+	label := locales.LikePrefix() + t.Title
 	if liked {
-		label = "取消喜欢 " + t.Title
+		label = locales.UnlikePrefix() + t.Title
 	}
 	btn := ui.Box(c.Key("np-like")).Label(label).Size(30, 30).Radius(15).
 		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
@@ -488,7 +490,7 @@ func (a *app) npLikeButton(c *ui.Context, t ytmusic.Track) {
 }
 
 func (a *app) npMoreButton(c *ui.Context, t ytmusic.Track) {
-	btn := ui.Box(c.Key("np-more")).Label("更多操作").Size(30, 30).Radius(15).
+	btn := ui.Box(c.Key("np-more")).Label(locales.MoreActions()).Size(30, 30).Radius(15).
 		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0).
 		ContextMenu(a.trackCopyMenu(c, t))
 	if btn.Hovered() {
@@ -516,11 +518,11 @@ func (a *app) npArtists(c *ui.Context, t ytmusic.Track) {
 		if isVideo {
 			ui.Box(c.Key("np-video-badge")).Padding(2, 7).Margin(0, 8, 0, 0).Radius(4).
 				Background(ui.RGBA(255, 255, 255, 0.1)).Children(func() {
-				ui.Text(c, "音乐视频").FontSize(10.5).TextColor(npWhite.Alpha(0.6))
+				ui.Text(c, locales.MusicVideo()).FontSize(10.5).TextColor(npWhite.Alpha(0.6))
 			})
 		}
 		if len(artists) == 0 {
-			ui.Text(c, "未知音乐人").FontSize(14).TextColor(npWhite.Alpha(0.5))
+			ui.Text(c, locales.UnknownArtist()).FontSize(14).TextColor(npWhite.Alpha(0.5))
 			return
 		}
 		for i, ar := range artists {
@@ -533,7 +535,7 @@ func (a *app) npArtists(c *ui.Context, t ytmusic.Track) {
 				r = route{page: pageArtist, id: artist.ID}
 			}
 			link := ui.Row(c.Key(fmt.Sprintf("np-artist-%s-%d", t.ID, i))).
-				Label("正在播放 · " + artist.Name).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+				Label(locales.NowPlayingPrefix() + artist.Name).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 			var label ui.Element
 			link.Children(func() {
 				label = ui.Text(c, artist.Name).FontSize(14).TextColor(npWhite.Alpha(0.55))
@@ -559,7 +561,7 @@ func (a *app) npScrubber(c *ui.Context) {
 		a.npScrub.v = a.pl.Position().Seconds()
 	}
 	s := ui.SliderBase(c.Key("np-scrub"), &a.npScrub.v, 0, durSec).Height(18).PaddingX(7).
-		Margin(20, 0, 0, 0).FocusRing(false).Label("播放进度").Cursor(ui.CursorPointer)
+		Margin(20, 0, 0, 0).FocusRing(false).Label(locales.PlaybackPosition()).Cursor(ui.CursorPointer)
 	// The press and its release come to the bar wherever the pointer is, and
 	// go on to the slider, which follows it.
 	s.HandleInput(func(ev ui.InputEvent) bool {
@@ -625,7 +627,7 @@ func (a *app) npTimes(c *ui.Context) {
 		ui.Spacer(c)
 		rem := "-" + formatTime(max(0, dur-pos))
 		if a.pl.Loading() {
-			rem = "正在缓冲…"
+			rem = locales.Buffering()
 		}
 		ui.Text(c, rem).FontSize(11).FontFeatures("tnum").TextColor(npWhite.Alpha(0.5))
 	})
@@ -634,17 +636,17 @@ func (a *app) npTimes(c *ui.Context) {
 func (a *app) npTransport(c *ui.Context) {
 	ui.Row(c).FillWidth().Margin(16, 0, 0, 0).Height(56).AlignItems(ui.Center).Justify(ui.Center).
 		Gap(10).Children(func() {
-		a.npIconButton(c, "np-shuffle", iconShuffle, 18, "随机播放", a.pl.Shuffle(), func() {
+		a.npIconButton(c, "np-shuffle", iconShuffle, 18, locales.Shuffle(), a.pl.Shuffle(), func() {
 			a.pl.SetShuffle(!a.pl.Shuffle())
 		})
-		a.npIconButton(c, "np-prev", iconPrev, 20, "上一首", false, a.pl.Prev)
+		a.npIconButton(c, "np-prev", iconPrev, 20, locales.Previous(), false, a.pl.Prev)
 		a.npPlayButton(c)
-		a.npIconButton(c, "np-next", iconNext, 20, "下一首", false, a.pl.Next)
+		a.npIconButton(c, "np-next", iconNext, 20, locales.Next(), false, a.pl.Next)
 		icon := iconRepeat
 		if a.pl.Repeat() == player.RepeatOne {
 			icon = iconRepeat1
 		}
-		a.npIconButton(c, "np-repeat", icon, 18, "循环播放", a.pl.Repeat() != player.RepeatOff, a.pl.ToggleRepeat)
+		a.npIconButton(c, "np-repeat", icon, 18, locales.Repeat(), a.pl.Repeat() != player.RepeatOff, a.pl.ToggleRepeat)
 	})
 }
 
@@ -668,9 +670,9 @@ func (a *app) npIconButton(c *ui.Context, key string, icon *ui.SVG, size float32
 
 func (a *app) npPlayButton(c *ui.Context) {
 	active := a.pl.Active()
-	label := "播放"
+	label := locales.Play()
 	if active {
-		label = "暂停"
+		label = locales.Pause()
 	}
 	btn := ui.Box(c.Key("np-play")).Label(label).Size(56, 56).Radius(28).
 		AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
@@ -700,7 +702,7 @@ func (a *app) npVolume(c *ui.Context) {
 		case vol < 0.5:
 			icon = iconVolumeLow
 		}
-		mute := ui.Box(c.Key("np-mute")).Label("静音").Size(26, 26).Radius(13).
+		mute := ui.Box(c.Key("np-mute")).Label(locales.Mute()).Size(26, 26).Radius(13).
 			AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
 		if mute.Hovered() {
 			mute.Background(ui.RGBA(255, 255, 255, 0.08))
@@ -717,7 +719,7 @@ func (a *app) npVolume(c *ui.Context) {
 		})
 
 		v := vol
-		s := ui.SliderBase(c.Key("np-volume"), &v, 0, 1).Width(124).Height(16).FocusRing(false).Label("音量")
+		s := ui.SliderBase(c.Key("np-volume"), &v, 0, 1).Width(124).Height(16).FocusRing(false).Label(locales.Volume())
 		if s.Changed() {
 			a.pl.SetVolume(v)
 		}

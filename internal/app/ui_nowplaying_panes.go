@@ -7,6 +7,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -15,12 +17,12 @@ func (a *app) npLyricsPane(c *ui.Context) {
 	if a.lyricsLoading {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载歌词…").FontSize(14).TextColor(npWhite.Alpha(0.55))
+			ui.Text(c, locales.LoadingLyrics()).FontSize(14).TextColor(npWhite.Alpha(0.55))
 		})
 		return
 	}
 	if a.lyrics == nil || len(a.lyrics.Lines) == 0 {
-		npPaneMessage(c, "暂无歌词", "这首歌暂时没有可显示的歌词")
+		npPaneMessage(c, locales.NoLyrics(), locales.LyricsEmptyHint())
 		return
 	}
 
@@ -62,7 +64,7 @@ func (a *app) npLyricsPane(c *ui.Context) {
 			}
 
 			scroll := ui.Scroll(c.Key("np-lyrics-scroll")).Vertical().TrackScroll(&a.npLyricScroll).
-				Label("歌词内容").Fill()
+				Label(locales.LyricsContent()).Fill()
 			var activeEl ui.Element
 			scroll.Children(func() {
 				ui.Column(c).FillWidth().Gap(4).Padding(0, 0, 220, 12).Children(func() {
@@ -135,7 +137,7 @@ func (a *app) npLyricLine(c *ui.Context, i int, synced bool, curLine int) ui.Ele
 func (a *app) npQueuePane(c *ui.Context) {
 	tracks, at := a.pl.QueueView()
 	if len(tracks) == 0 {
-		npPaneMessage(c, "暂无待播歌曲", "从歌单、专辑或搜索结果里挑一首开始播放")
+		npPaneMessage(c, locales.NothingUpNext(), locales.NowPlayingEmptyHint())
 		return
 	}
 	if a.npQueueJump {
@@ -201,7 +203,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 	if a.relatedLoading {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在加载相关推荐…").FontSize(13).TextColor(npWhite.Alpha(0.55))
+			ui.Text(c, locales.LoadingRelatedMusic()).FontSize(13).TextColor(npWhite.Alpha(0.55))
 		})
 		return
 	}
@@ -224,7 +226,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 		}
 	}
 	if trackShelf == nil && cardShelf == nil {
-		npPaneMessage(c, "暂无相关推荐", "换一首歌再试试")
+		npPaneMessage(c, locales.NothingRelatedYet(), locales.TryAnotherSong())
 		return
 	}
 
@@ -238,7 +240,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 					}
 				}
 				ui.Column(c).FillWidth().Gap(4).Children(func() {
-					a.npShelfTitle(c, shelfTitle(trackShelf.Title, "你可能还喜欢"))
+					a.npShelfTitle(c, shelfTitle(trackShelf.Title, locales.YouMightAlsoLike()))
 					for i := range tracks {
 						idx := i
 						tr := tracks[i]
@@ -250,7 +252,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 			}
 			if cardShelf != nil {
 				ui.Column(c).FillWidth().Gap(12).Children(func() {
-					a.npShelfTitle(c, shelfTitle(cardShelf.Title, "推荐的播放列表"))
+					a.npShelfTitle(c, shelfTitle(cardShelf.Title, locales.RecommendedPlaylists()))
 					a.npRelatedCards(c, cardShelf.Items, paneW)
 				})
 			}

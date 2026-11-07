@@ -10,6 +10,8 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -53,9 +55,9 @@ func (a *app) accountModalView(c *ui.Context) {
 		dialog.Children(func() {
 			// Dialog Header
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				title := "登录 YouTube Music"
+				title := locales.SignInToYouTubeMusic()
 				if a.profile != nil {
-					title = "我的账号"
+					title = locales.MyAccount()
 				}
 				ui.Text(c, title).FontSize(18).Bold().TextColor(p.text)
 				ui.Spacer(c)
@@ -82,7 +84,7 @@ func (a *app) accountModalView(c *ui.Context) {
 					if a.profile.Handle != "" {
 						ui.Text(c, a.profile.Handle).FontSize(13).TextColor(p.muted)
 					}
-					ui.Text(c, "已成功绑定 Google 账号").FontSize(12).TextColor(p.faint)
+					ui.Text(c, locales.SignedIn()).FontSize(12).TextColor(p.faint)
 
 					signOutBtn := ui.Row(c.Key("sign-out-btn")).Height(38).Radius(19).Background(p.card).Padding(0, 24).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 					if signOutBtn.Hovered() {
@@ -92,7 +94,7 @@ func (a *app) accountModalView(c *ui.Context) {
 						a.signOut()
 					}
 					signOutBtn.Children(func() {
-						ui.Text(c, "退出登录").FontSize(13).TextColor(p.accent)
+						ui.Text(c, locales.SignOut()).FontSize(13).TextColor(p.accent)
 					})
 				})
 			} else {
@@ -106,14 +108,14 @@ func (a *app) renderWebLoginFlow(c *ui.Context) {
 	p := a.pal
 
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(16).Padding(8, 0).Children(func() {
-		ui.Text(c, "使用官方网页窗口直接登录 Google 账号").FontSize(13).Bold().TextColor(p.text).TextAlign(ui.Center)
-		ui.Text(c, "点击下方按钮将打开 Google 官方登录窗口。\n登录完成后窗口会自动关闭，并同步您的专属推荐与歌单。").FontSize(12).TextColor(p.muted).TextAlign(ui.Center).LineHeight(1.4)
+		ui.Text(c, locales.SignInWindowHint()).FontSize(13).Bold().TextColor(p.text).TextAlign(ui.Center)
+		ui.Text(c, locales.SignInDialogDetail()).FontSize(12).TextColor(p.muted).TextAlign(ui.Center).LineHeight(1.4)
 
 		if a.loginWin != nil {
 			ui.Column(c).Height(120).AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 					ui.Spinner(c)
-					ui.Text(c, "登录窗口已打开，请在窗口中登录 Google 账号...").FontSize(12.5).TextColor(p.text)
+					ui.Text(c, locales.SignInWindowOpened()).FontSize(12.5).TextColor(p.text)
 				})
 
 				reopenBtn := ui.Row(c.Key("reopen-login-win")).Height(32).Radius(16).Background(p.card).Padding(0, 16).AlignItems(ui.Center).Cursor(ui.CursorPointer)
@@ -121,7 +123,7 @@ func (a *app) renderWebLoginFlow(c *ui.Context) {
 					a.loginWin.Focus()
 				}
 				reopenBtn.Children(func() {
-					ui.Text(c, "置顶登录窗口").FontSize(12).TextColor(p.muted)
+					ui.Text(c, locales.SignInWindowOnTop()).FontSize(12).TextColor(p.muted)
 				})
 			})
 		} else {
@@ -135,10 +137,10 @@ func (a *app) renderWebLoginFlow(c *ui.Context) {
 				}
 				loginBtn.Children(func() {
 					ui.Icon(c, iconExternal).Size(16, 16).TextColor(p.onAccent)
-					ui.Text(c, "打开 Google 登录窗口").FontSize(14).Bold().TextColor(p.onAccent)
+					ui.Text(c, locales.SignInWindowOpen()).FontSize(14).Bold().TextColor(p.onAccent)
 				})
 
-				ui.Text(c, "无需寻找或复制任何复杂 Cookie，官方窗口登录全自动提取").FontSize(11).TextColor(p.faint)
+				ui.Text(c, locales.SignInWindowDetail()).FontSize(11).TextColor(p.faint)
 			})
 		}
 	})
@@ -164,7 +166,7 @@ func (a *app) openWebLogin() {
 	a.loginSession = loginSession
 
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "登录 YouTube Music",
+		Title:     locales.SignInToYouTubeMusic(),
 		Width:     540,
 		Height:    720,
 		MinWidth:  400,
@@ -282,9 +284,9 @@ func (a *app) saveCookieSession(cookie string, attempt uint64) {
 		if prof == nil {
 			sapisid := ytmusic.ExtractSAPISID(cookie)
 			if sapisid != "" {
-				prof = &ytmusic.Profile{Name: "已登录 YouTube 用户"}
+				prof = &ytmusic.Profile{Name: locales.SignedInYouTubeUser()}
 			} else {
-				prof = &ytmusic.Profile{Name: "已登录用户"}
+				prof = &ytmusic.Profile{Name: locales.SignedInUser()}
 			}
 		}
 
@@ -302,7 +304,7 @@ func (a *app) saveCookieSession(cookie string, attempt uint64) {
 		if err != nil {
 			a.post(func() {
 				if a.authAttemptIsCurrent(attempt) {
-					a.authErr = "登录信息保存失败，请检查用户数据目录后重试"
+					a.authErr = locales.SignInSaveFailed()
 				}
 			})
 			return
@@ -337,7 +339,7 @@ func (a *app) signOut() {
 	err := ytmusic.ClearSession()
 	a.authMu.Unlock()
 	if err != nil {
-		a.authErr = "退出登录未完全清除本地凭据，请重试"
+		a.authErr = locales.SignOutFailed()
 	}
 
 	a.clearDefaultBrowserData()

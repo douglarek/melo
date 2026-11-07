@@ -2,6 +2,8 @@ package app
 
 import (
 	"github.com/egoist/mygo/ui"
+
+	"github.com/douglarek/melo/locales"
 )
 
 func (a *app) settingsModalView(c *ui.Context) {
@@ -21,7 +23,7 @@ func (a *app) settingsModalView(c *ui.Context) {
 		dialog.Children(func() {
 			// Header
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "设置").FontSize(18).Bold().TextColor(p.text)
+				ui.Text(c, locales.Settings()).FontSize(18).Bold().TextColor(p.text)
 				ui.Spacer(c)
 				closeBtn := ui.Box(c.Key("set-close")).Size(28, 28).Radius(14).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
 				if closeBtn.Hovered() {
@@ -66,7 +68,7 @@ func (a *app) settingsModalView(c *ui.Context) {
 									a.signOut()
 								}
 								signOutBtn.Children(func() {
-									ui.Text(c, "退出登录").FontSize(12).TextColor(p.accent)
+									ui.Text(c, locales.SignOut()).FontSize(12).TextColor(p.accent)
 								})
 							})
 						})
@@ -74,8 +76,8 @@ func (a *app) settingsModalView(c *ui.Context) {
 						ui.Column(c).FillWidth().Background(p.card).Radius(12).Padding(16).Gap(10).Children(func() {
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 								ui.Column(c).Grow(1).Gap(3).Children(func() {
-									ui.Text(c, "Google 账号").FontSize(15).Bold().TextColor(p.text)
-									ui.Text(c, "登录以同步您的云端播放列表与喜爱的音乐").FontSize(12).TextColor(p.muted)
+									ui.Text(c, locales.GoogleAccount()).FontSize(15).Bold().TextColor(p.text)
+									ui.Text(c, locales.SignInHint()).FontSize(12).TextColor(p.muted)
 								})
 								loginBtn := ui.Row(c.Key("set-login-btn")).Height(32).Radius(16).Background(p.accent).Padding(0, 16).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 								if loginBtn.Clicked() {
@@ -83,7 +85,7 @@ func (a *app) settingsModalView(c *ui.Context) {
 									a.openLogin()
 								}
 								loginBtn.Children(func() {
-									ui.Text(c, "登录账号").FontSize(12.5).Bold().TextColor(p.onAccent)
+									ui.Text(c, locales.SignInButton()).FontSize(12.5).Bold().TextColor(p.onAccent)
 								})
 							})
 						})
@@ -91,15 +93,15 @@ func (a *app) settingsModalView(c *ui.Context) {
 
 					// 1. Appearance / Theme
 					ui.Column(c).FillWidth().Gap(10).Children(func() {
-						ui.Text(c, "外观主题").FontSize(14).Bold().TextColor(p.text)
+						ui.Text(c, locales.Appearance()).FontSize(14).Bold().TextColor(p.text)
 
 						themes := []struct {
 							key   string
 							label string
 						}{
-							{"system", "跟随系统"},
-							{"dark", "深色外观"},
-							{"light", "浅色外观"},
+							{"system", locales.LanguageSystem()},
+							{"dark", locales.Dark()},
+							{"light", locales.Light()},
 						}
 
 						ui.Row(c).FillWidth().Gap(8).Children(func() {
@@ -129,30 +131,69 @@ func (a *app) settingsModalView(c *ui.Context) {
 						})
 					})
 
-					// 2. Audio quality
-					ui.Column(c).FillWidth().Gap(6).Children(func() {
-						ui.Text(c, "音质设置").FontSize(14).Bold().TextColor(p.text)
-						ui.Text(c, "AAC 128 kbps 自适应流（边下边播），不可用时回退 96 kbps").FontSize(12).TextColor(p.muted)
+					// 2. Language
+					ui.Column(c).FillWidth().Gap(10).Children(func() {
+						ui.Text(c, locales.Language()).FontSize(14).Bold().TextColor(p.text)
+
+						// Each language is named in itself, as a language menu does.
+						languages := []struct {
+							tag   string
+							label string
+						}{
+							{"", locales.LanguageSystem()},
+							{"zh-Hans", "简体中文"},
+							{"en", "English"},
+						}
+
+						ui.Row(c).FillWidth().Gap(8).Children(func() {
+							for _, language := range languages {
+								language := language
+								active := a.settings.Language == language.tag
+								bg := p.card
+								txtCol := p.muted
+								if active {
+									bg = p.accent
+									txtCol = p.onAccent
+								}
+
+								btn := ui.Box(c.Key("language-" + language.tag)).Grow(1).Height(36).Radius(8).Background(bg).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer)
+								if btn.Clicked() {
+									a.setLanguage(language.tag)
+								}
+								btn.Children(func() {
+									txt := ui.Text(c, language.label).FontSize(13).TextColor(txtCol)
+									if active {
+										txt.Bold()
+									}
+								})
+							}
+						})
 					})
 
-					// 3. Cache
+					// 3. Audio quality
+					ui.Column(c).FillWidth().Gap(6).Children(func() {
+						ui.Text(c, locales.AudioQuality()).FontSize(14).Bold().TextColor(p.text)
+						ui.Text(c, locales.AudioQualityHint()).FontSize(12).TextColor(p.muted)
+					})
+
+					// 4. Cache
 					ui.Column(c).FillWidth().Gap(10).Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "本地缓存").FontSize(14).Bold().TextColor(p.text)
+							ui.Text(c, locales.Cache()).FontSize(14).Bold().TextColor(p.text)
 							ui.Spacer(c)
-							ui.Text(c, "当前 "+formatBytes(a.pl.Cache.Size())).FontSize(11).TextColor(p.muted)
+							ui.Text(c, locales.CacheInUsePrefix()+formatBytes(a.pl.Cache.Size())).FontSize(11).TextColor(p.muted)
 						})
-						ui.Text(c, "已缓存歌曲将在再次播放时免网络秒开").FontSize(12).TextColor(p.muted)
+						ui.Text(c, locales.CacheHint()).FontSize(12).TextColor(p.muted)
 
 						cacheOptions := []struct {
 							mb    int64
 							label string
 						}{
-							{0, "关闭"},
+							{0, locales.Off()},
 							{1024, "1G"},
 							{2048, "2G"},
 							{4096, "4G"},
-							{-1, "无限"},
+							{-1, locales.Unlimited()},
 						}
 						ui.Row(c).FillWidth().Gap(6).Children(func() {
 							for _, opt := range cacheOptions {
@@ -180,7 +221,7 @@ func (a *app) settingsModalView(c *ui.Context) {
 						})
 
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "超出上限时自动清理最久未播放的缓存").FontSize(11).TextColor(p.muted)
+							ui.Text(c, locales.CacheLimitHint()).FontSize(11).TextColor(p.muted)
 							ui.Spacer(c)
 							clearBtn := ui.Row(c.Key("clear-cache-btn")).Height(30).Radius(15).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 							if clearBtn.Clicked() {
@@ -193,23 +234,23 @@ func (a *app) settingsModalView(c *ui.Context) {
 								a.releaseMemoryNow()
 							}
 							clearBtn.Children(func() {
-								ui.Text(c, "清理缓存").FontSize(12).TextColor(p.text)
+								ui.Text(c, locales.ClearCache()).FontSize(12).TextColor(p.text)
 							})
 						})
 					})
 
-					// 4. Close behavior
+					// 5. Close behavior
 					ui.Column(c).FillWidth().Gap(10).Children(func() {
-						ui.Text(c, "关闭窗口时").FontSize(14).Bold().TextColor(p.text)
-						ui.Text(c, "保持在菜单栏时，关闭窗口后音乐继续播放，可从托盘图标重新打开。").FontSize(12).TextColor(p.muted)
+						ui.Text(c, locales.WhenTheWindowCloses()).FontSize(14).Bold().TextColor(p.text)
+						ui.Text(c, locales.CloseToTrayHint()).FontSize(12).TextColor(p.muted)
 
 						options := []struct {
 							key   string
 							label string
 							tray  bool
 						}{
-							{"exit", "退出应用", false},
-							{"tray", "保持在菜单栏", true},
+							{"exit", locales.QuitTheApp(), false},
+							{"tray", locales.KeepInTheMenuBar(), true},
 						}
 						ui.Row(c).FillWidth().Gap(8).Children(func() {
 							for _, opt := range options {
@@ -235,38 +276,38 @@ func (a *app) settingsModalView(c *ui.Context) {
 							}
 						})
 						if a.settings.CloseToTray && a.trayErr != nil {
-							ui.Text(c, "当前系统托盘不可用，关闭窗口仍会退出应用。").FontSize(11).TextColor(p.muted)
+							ui.Text(c, locales.TrayUnavailableHint()).FontSize(11).TextColor(p.muted)
 						}
 					})
 
-					// 5. Track notifications
+					// 6. Track notifications
 					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						ui.Text(c, "切歌通知").FontSize(14).Bold().TextColor(p.text)
-						cb := ui.Checkbox(c, &a.settings.TrackNotifications, "切歌时显示桌面通知")
+						ui.Text(c, locales.SongNotifications()).FontSize(14).Bold().TextColor(p.text)
+						cb := ui.Checkbox(c, &a.settings.TrackNotifications, locales.NotificationsToggle())
 						if cb.Changed() {
 							a.settings.save()
 						}
-						ui.Text(c, "仅当窗口失去焦点时通知；应用在前台时不打扰。").FontSize(11).TextColor(p.muted)
+						ui.Text(c, locales.NotificationsHint()).FontSize(11).TextColor(p.muted)
 					})
 
-					// 6. Software updates
+					// 7. Software updates
 					ui.Column(c).FillWidth().Gap(8).Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "软件更新").FontSize(14).Bold().TextColor(p.text)
+							ui.Text(c, locales.SoftwareUpdate()).FontSize(14).Bold().TextColor(p.text)
 							ui.Spacer(c)
 							ui.Text(c, a.versionLabel()).FontSize(11).TextColor(p.muted)
 						})
 
 						if a.update.supported {
-							cb := ui.Checkbox(c, &a.settings.CheckUpdates, "自动检查更新")
+							cb := ui.Checkbox(c, &a.settings.CheckUpdates, locales.AutoChecksToggle())
 							if cb.Changed() {
 								a.setUpdateChecks(a.settings.CheckUpdates)
 							}
-							ui.Text(c, "开启后每天自动检查一次").FontSize(11).TextColor(p.muted)
+							ui.Text(c, locales.AutoChecksHint()).FontSize(11).TextColor(p.muted)
 						} else {
 							// 开发版，以及 deb / rpm 等由软件包管理器安装的版本，
 							// 不能替换自身。
-							ui.Text(c, "当前为开发版本，或由软件包管理器（如 .deb / RPM）安装，无法在应用内自行更新。").FontSize(11).TextColor(p.muted)
+							ui.Text(c, locales.UpdatesUnavailableHint()).FontSize(11).TextColor(p.muted)
 						}
 
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
@@ -280,15 +321,15 @@ func (a *app) settingsModalView(c *ui.Context) {
 								a.checkUpdates()
 							}
 							checkBtn.Children(func() {
-								ui.Text(c, "检查更新").FontSize(12).TextColor(p.accent)
+								ui.Text(c, locales.CheckForUpdates()).FontSize(12).TextColor(p.accent)
 							})
 						})
 					})
 
-					// 7. About
+					// 8. About
 					ui.Column(c).FillWidth().Background(p.card).Radius(10).Padding(12).Gap(4).Children(func() {
 						ui.Text(c, "Melo").FontSize(13).Bold().TextColor(p.text)
-						ui.Text(c, a.versionLabel()+" · 第三方 YouTube Music 客户端").FontSize(11).TextColor(p.muted)
+						ui.Text(c, a.versionLabel()+locales.ThirdPartyClientSuffix()).FontSize(11).TextColor(p.muted)
 					})
 				})
 			})

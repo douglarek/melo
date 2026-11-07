@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/douglarek/melo/locales"
 	"runtime"
 
 	"github.com/egoist/mygo"
@@ -16,52 +17,52 @@ func (a *app) setMenu() {
 	name := "Melo"
 
 	appMenu := []*mygo.MenuItem{
-		{Role: mygo.RoleAbout, Label: "关于 " + name},
+		{Role: mygo.RoleAbout, Label: locales.AboutPrefix() + name},
 		mygo.Separator(),
-		{Label: "检查更新…", Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
-		{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: run(func() { a.settingsModalOpen = true })},
+		{Label: locales.CheckForUpdatesMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
+		{Label: locales.SettingsMenu(), Accelerator: "CmdOrCtrl+,", Click: run(func() { a.settingsModalOpen = true })},
 		mygo.Separator(),
 	}
 
 	if runtime.GOOS == "darwin" {
 		appMenu = append(appMenu,
-			&mygo.MenuItem{Role: mygo.RoleServices, Label: "服务"},
+			&mygo.MenuItem{Role: mygo.RoleServices, Label: locales.Services()},
 			mygo.Separator(),
-			&mygo.MenuItem{Role: mygo.RoleHide, Label: "隐藏 " + name},
-			&mygo.MenuItem{Role: mygo.RoleHideOthers, Label: "隐藏其他"},
-			&mygo.MenuItem{Role: mygo.RoleUnhide, Label: "全部显示"},
+			&mygo.MenuItem{Role: mygo.RoleHide, Label: locales.HidePrefix() + name},
+			&mygo.MenuItem{Role: mygo.RoleHideOthers, Label: locales.HideOthers()},
+			&mygo.MenuItem{Role: mygo.RoleUnhide, Label: locales.ShowAll()},
 			mygo.Separator(),
 		)
 	}
-	appMenu = append(appMenu, &mygo.MenuItem{Role: mygo.RoleQuit, Label: "退出 " + name})
+	appMenu = append(appMenu, &mygo.MenuItem{Role: mygo.RoleQuit, Label: locales.QuitPrefix() + name})
 
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 		{Label: name, Submenu: appMenu},
-		{Label: "编辑", Submenu: []*mygo.MenuItem{
-			{Role: mygo.RoleUndo, Label: "撤销"},
-			{Role: mygo.RoleRedo, Label: "重做"},
+		{Label: locales.Edit(), Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleUndo, Label: locales.Undo()},
+			{Role: mygo.RoleRedo, Label: locales.Redo()},
 			mygo.Separator(),
-			{Role: mygo.RoleCut, Label: "剪切"},
-			{Role: mygo.RoleCopy, Label: "拷贝"},
-			{Role: mygo.RolePaste, Label: "粘贴"},
-			{Role: mygo.RoleSelectAll, Label: "全选"},
+			{Role: mygo.RoleCut, Label: locales.Cut()},
+			{Role: mygo.RoleCopy, Label: locales.Copy()},
+			{Role: mygo.RolePaste, Label: locales.Paste()},
+			{Role: mygo.RoleSelectAll, Label: locales.SelectAll()},
 		}},
-		{Label: "控制", Submenu: []*mygo.MenuItem{
-			{Label: "播放/暂停", Click: run(func() { a.pl.TogglePlay() })},
-			{Label: "下一首", Accelerator: "CmdOrCtrl+Right", Click: run(func() { a.pl.Next() })},
-			{Label: "上一首", Accelerator: "CmdOrCtrl+Left", Click: run(func() { a.pl.Prev() })},
+		{Label: locales.Controls(), Submenu: []*mygo.MenuItem{
+			{Label: locales.PlayPause(), Click: run(func() { a.pl.TogglePlay() })},
+			{Label: locales.Next(), Accelerator: "CmdOrCtrl+Right", Click: run(func() { a.pl.Next() })},
+			{Label: locales.Previous(), Accelerator: "CmdOrCtrl+Left", Click: run(func() { a.pl.Prev() })},
 			mygo.Separator(),
-			{Label: "随机播放", Click: run(func() { a.pl.SetShuffle(!a.pl.Shuffle()) })},
-			{Label: "切换循环模式", Click: run(func() { a.pl.ToggleRepeat() })},
+			{Label: locales.Shuffle(), Click: run(func() { a.pl.SetShuffle(!a.pl.Shuffle()) })},
+			{Label: locales.CycleRepeatMode(), Click: run(func() { a.pl.ToggleRepeat() })},
 			mygo.Separator(),
-			{Label: "正在播放", Accelerator: "CmdOrCtrl+L", Click: run(func() {
+			{Label: locales.NowPlaying(), Accelerator: "CmdOrCtrl+L", Click: run(func() {
 				a.nowPlayingOpen = !a.nowPlayingOpen && a.pl.Current() != nil
 			})},
 		}},
-		{Label: "窗口", Submenu: []*mygo.MenuItem{
-			{Role: mygo.RoleMinimize, Label: "最小化"},
-			{Role: mygo.RoleZoom, Label: "缩放"},
-			{Role: mygo.RoleClose, Label: "关闭"},
+		{Label: locales.Window(), Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleMinimize, Label: locales.Minimize()},
+			{Role: mygo.RoleZoom, Label: locales.Zoom()},
+			{Role: mygo.RoleClose, Label: locales.CloseWindow()},
 		}},
 	}))
 }

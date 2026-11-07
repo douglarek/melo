@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/douglarek/melo/locales"
 	"os"
 	"path/filepath"
 	"time"
@@ -88,7 +89,7 @@ func (a *app) restorePlayerSession() {
 }
 
 func (a *app) saveLibraryCache() {
-	liked := &ytmusic.Playlist{ID: "LM", Title: "我喜欢的音乐"}
+	liked := &ytmusic.Playlist{ID: "LM", Title: locales.LikedMusic()}
 	if pl := a.playlists["LM"]; pl != nil {
 		*liked = *pl
 	}

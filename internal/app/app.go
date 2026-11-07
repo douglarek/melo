@@ -15,6 +15,8 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/locales"
+
 	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -213,6 +215,7 @@ func Run() error {
 			secureUserDataDir()
 		}()
 		a.settings = loadSettings()
+		a.applyLanguage()
 		a.settings.applyAppearance()
 
 		// Cache setup
@@ -249,9 +252,9 @@ func Run() error {
 		a.pl.Error = func(id string, err error) {
 			log.Printf("playback %s: %v", id, err)
 			if errors.Is(err, ytmusic.ErrUnavailable) {
-				a.playbackErr = "这首歌在 YouTube 上不可用，可能受地区限制"
+				a.playbackErr = locales.PlaybackUnavailable()
 			} else {
-				a.playbackErr = "这首歌曲暂时无法播放"
+				a.playbackErr = locales.PlaybackFailed()
 			}
 		}
 		a.pl.DurationResolved = func(id string, durationMs int64) {
