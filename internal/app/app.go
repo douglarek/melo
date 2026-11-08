@@ -173,8 +173,6 @@ type app struct {
 	memoryTimer       *time.Timer
 	notifyTrackID     string
 	notifySeq         int
-	notifyMu          sync.Mutex
-	notifyID          uint32
 }
 
 func (a *app) post(fn func()) {

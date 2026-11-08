@@ -1,14 +1,6 @@
 package app
 
 import (
-	"bufio"
-	"github.com/douglarek/melo/locales"
-	"io"
-	"os"
-	"os/exec"
-	"runtime"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -41,25 +33,31 @@ func (a *app) notifyTrack(t *ytmusic.Track, seq int) {
 	if seq != a.notifySeq {
 		return
 	}
-	body := t.ArtistNames()
-	if runtime.GOOS == "linux" && a.notifyLinux(t.Title, body, icon) {
-		return
-	}
-	opts := mygo.NotificationOptions{
-		ID:     "melo-track",
-		Title:  t.Title,
-		Body:   body,
-		Silent: true,
-	}
-	if len(icon) > 0 {
-		opts.Sender = &mygo.NotificationSender{ID: "melo-" + t.ID, Name: t.Title, Avatar: icon}
-	}
-	n := mygo.NewNotification(opts)
+	n := mygo.NewNotification(a.notificationOptions(t, icon))
 	n.OnClick(func() {
 		a.showFromNotification()
 		n.Close()
 	})
 	_ = n.Show()
+}
+
+// notificationOptions describes the notification of a track, whose cover is
+// its Image: an attachment on macOS, the image hint on Linux and the
+// balloon's large icon on Windows.
+//
+// It is not a Sender: that is the avatar of a person's message, which macOS
+// shows only for a signed app with the communication entitlement, and which
+// the other platforms ignore.
+func (a *app) notificationOptions(t *ytmusic.Track, cover []byte) mygo.NotificationOptions {
+	return mygo.NotificationOptions{
+		// One id, so that the next track replaces the notification of the
+		// one before rather than stacking beside it.
+		ID:     "melo-track",
+		Title:  t.Title,
+		Body:   t.ArtistNames(),
+		Image:  cover,
+		Silent: true,
+	}
 }
 
 func (a *app) showFromNotification() {
@@ -92,119 +90,4 @@ func (a *app) notificationIcon(t *ytmusic.Track) []byte {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return nil
-}
-
-func (a *app) notifyLinux(title, body string, icon []byte) bool {
-	path, err := exec.LookPath("notify-send")
-	if err != nil {
-		return false
-	}
-
-	iconPath := ""
-	if len(icon) > 0 {
-		f, err := os.CreateTemp("", "melo-notify-*.jpg")
-		if err == nil {
-			if _, err = f.Write(icon); err == nil {
-				iconPath = f.Name()
-			}
-			_ = f.Close()
-			if iconPath == "" {
-				_ = os.Remove(f.Name())
-			}
-		}
-	}
-
-	idR, idW, err := os.Pipe()
-	if err != nil {
-		if iconPath != "" {
-			_ = os.Remove(iconPath)
-		}
-		return false
-	}
-
-	a.notifyMu.Lock()
-	replace := a.notifyID
-	a.notifyMu.Unlock()
-
-	args := []string{
-		"--app-name=Melo",
-		"--urgency=low",
-		"--id-fd=3",
-		locales.NotificationShowAction(),
-	}
-	if replace != 0 {
-		args = append(args, "--replace-id="+strconv.FormatUint(uint64(replace), 10))
-	}
-	if iconPath != "" {
-		args = append(args, "--icon="+iconPath)
-	}
-	args = append(args, "--", title, body)
-
-	cmd := exec.Command(path, args...)
-	cmd.ExtraFiles = []*os.File{idW}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = idR.Close()
-		_ = idW.Close()
-		if iconPath != "" {
-			_ = os.Remove(iconPath)
-		}
-		return false
-	}
-	if err := cmd.Start(); err != nil {
-		_ = idR.Close()
-		_ = idW.Close()
-		if iconPath != "" {
-			_ = os.Remove(iconPath)
-		}
-		return false
-	}
-	_ = idW.Close()
-
-	id, err := readNotificationID(idR)
-	_ = idR.Close()
-	if err != nil || id == 0 {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		if iconPath != "" {
-			_ = os.Remove(iconPath)
-		}
-		return false
-	}
-
-	a.notifyMu.Lock()
-	a.notifyID = id
-	a.notifyMu.Unlock()
-
-	go func() {
-		out, _ := io.ReadAll(stdout)
-		_ = cmd.Wait()
-		if strings.Contains(string(out), "default") {
-			a.showFromNotification()
-		}
-		a.notifyMu.Lock()
-		if a.notifyID == id {
-			a.notifyID = 0
-		}
-		a.notifyMu.Unlock()
-		if iconPath != "" {
-			_ = os.Remove(iconPath)
-		}
-	}()
-	if iconPath != "" {
-		time.AfterFunc(5*time.Minute, func() { _ = os.Remove(iconPath) })
-	}
-	return true
-}
-
-func readNotificationID(r io.Reader) (uint32, error) {
-	line, err := bufio.NewReader(r).ReadString('\n')
-	if err != nil {
-		return 0, err
-	}
-	id, err := strconv.ParseUint(strings.TrimSpace(line), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(id), nil
 }
