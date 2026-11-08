@@ -5,6 +5,10 @@ name: Release
 # The jobs build, sign and upload every platform to a draft release, which
 # the last job publishes: installed Mac and Windows apps then find the
 # update. See https://github.com/egoist/mygo/blob/main/docs/updates.md
+#
+# Pushing to master runs Rolling build instead, which attaches the platforms of
+# every commit to a prerelease that installed apps skip: to try a build, not to
+# update to it.
 on:
   push:
     tags: ["v*"]
