@@ -183,8 +183,8 @@ func (a *app) sidebar(c *ui.Context) {
 
 	// Foot of sidebar: clean, continuous sidebar without dividing line
 	ui.Column(c.Key("sidebar-foot")).FillWidth().Padding(0, 10, 6, 10).Gap(6).Justify(ui.End).Children(func() {
-		if a.settings.UpdateAvailable != "" {
-			a.updateBadge(c)
+		if v := a.offeredUpdate(); v != "" {
+			a.updateBadge(c, v)
 		}
 		userRow := ui.Row(c.Key("sidebar-user-row")).FillWidth().Height(44).Radius(8).Padding(0, 8).AlignItems(ui.Center).Gap(10).Cursor(ui.CursorPointer)
 		if userRow.Hovered() {
@@ -226,7 +226,7 @@ func (a *app) sidebar(c *ui.Context) {
 
 // updateBadge points at the version a background check found. Clicking it
 // opens the update window, which checks again and offers to install it.
-func (a *app) updateBadge(c *ui.Context) {
+func (a *app) updateBadge(c *ui.Context, version string) {
 	p := a.pal
 	badge := ui.Row(c.Key("sidebar-update")).FillWidth().Height(28).Radius(8).Background(p.card).Padding(0, 10).AlignItems(ui.Center).Gap(7).Cursor(ui.CursorPointer).Tooltip(locales.UpdateBadgeTooltip())
 	if badge.Hovered() {
@@ -237,7 +237,7 @@ func (a *app) updateBadge(c *ui.Context) {
 	}
 	badge.Children(func() {
 		ui.Box(c).Size(6, 6).Radius(3).Background(p.accent)
-		ui.Text(c, locales.UpdateBadgePrefix()+a.settings.UpdateAvailable).FontSize(12).TextColor(p.accent).SingleLine()
+		ui.Text(c, locales.UpdateBadgePrefix()+version).FontSize(12).TextColor(p.accent).SingleLine()
 	})
 }
 

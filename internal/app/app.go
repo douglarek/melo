@@ -284,8 +284,10 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 
-		a.setMenu()
+		// Updates first: the menus drop their check item for a build that
+		// cannot install one, and need to know which build this is.
 		a.setupUpdates()
+		a.setMenu()
 		a.setupMediaKeys()
 		a.setupTray()
 		a.win.OnClose(func(e *mygo.CloseEvent) {

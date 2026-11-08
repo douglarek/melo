@@ -9,20 +9,31 @@ import (
 
 // setMenu configures the macOS application menu bar.
 func (a *app) setMenu() {
+	mygo.App.SetMenu(mygo.NewMenu(a.menuItems("Melo")))
+}
+
+// menuItems is the application menu: the app's own items, then the Edit,
+// Controls and Window submenus.
+func (a *app) menuItems(name string) []*mygo.MenuItem {
 	run := func(fn func()) func(*mygo.MenuItem, *mygo.Window) {
 		return func(*mygo.MenuItem, *mygo.Window) {
 			a.post(fn)
 		}
 	}
-	name := "Melo"
 
 	appMenu := []*mygo.MenuItem{
 		{Role: mygo.RoleAbout, Label: locales.AboutPrefix() + name},
 		mygo.Separator(),
-		{Label: locales.CheckForUpdatesMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
-		{Label: locales.SettingsMenu(), Accelerator: "CmdOrCtrl+,", Click: run(a.openSettings)},
-		mygo.Separator(),
 	}
+	// A build that cannot install an update offers no check for one, as its
+	// settings page hides the update section.
+	if a.update.supported {
+		appMenu = append(appMenu, &mygo.MenuItem{Label: locales.CheckForUpdatesMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }})
+	}
+	appMenu = append(appMenu,
+		&mygo.MenuItem{Label: locales.SettingsMenu(), Accelerator: "CmdOrCtrl+,", Click: run(a.openSettings)},
+		mygo.Separator(),
+	)
 
 	if runtime.GOOS == "darwin" {
 		appMenu = append(appMenu,
@@ -36,7 +47,7 @@ func (a *app) setMenu() {
 	}
 	appMenu = append(appMenu, &mygo.MenuItem{Role: mygo.RoleQuit, Label: locales.QuitPrefix() + name})
 
-	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+	return []*mygo.MenuItem{
 		{Label: name, Submenu: appMenu},
 		{Label: locales.Edit(), Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleUndo, Label: locales.Undo()},
@@ -64,5 +75,5 @@ func (a *app) setMenu() {
 			{Role: mygo.RoleZoom, Label: locales.Zoom()},
 			{Role: mygo.RoleClose, Label: locales.CloseWindow()},
 		}},
-	}))
+	}
 }

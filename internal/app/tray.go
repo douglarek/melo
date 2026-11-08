@@ -55,25 +55,42 @@ func (a *app) setupTray() {
 // trayMenu is the menu of the tray icon, built each time it shows: its
 // update item names the version a background check found, when there is one.
 func (a *app) trayMenu() *mygo.Menu {
-	return mygo.NewMenu([]*mygo.MenuItem{
+	items := []*mygo.MenuItem{
 		{Label: locales.ShowHideApp(), Click: func(*mygo.MenuItem, *mygo.Window) { a.toggleWindow() }},
 		mygo.Separator(),
 		{Label: locales.PlayPauseMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.togglePlayback() }},
 		{Label: locales.Previous(), Click: func(*mygo.MenuItem, *mygo.Window) { a.playerPrev() }},
 		{Label: locales.Next(), Click: func(*mygo.MenuItem, *mygo.Window) { a.playerNext() }},
 		mygo.Separator(),
-		{Label: a.updateMenuLabel(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
-		mygo.Separator(),
-		{Label: locales.QuitApp(), Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
-	})
+	}
+	// A build that cannot install an update offers no check for one, as its
+	// settings page hides the update section.
+	if a.update.supported {
+		items = append(items,
+			&mygo.MenuItem{Label: a.updateMenuLabel(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
+			mygo.Separator(),
+		)
+	}
+	items = append(items, &mygo.MenuItem{Label: locales.QuitApp(), Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }})
+	return mygo.NewMenu(items)
 }
 
 // updateMenuLabel names the update item after what a background check found.
 func (a *app) updateMenuLabel() string {
-	if v := a.settings.UpdateAvailable; v != "" {
+	if v := a.offeredUpdate(); v != "" {
 		return locales.UpdateToPrefix() + v + "…"
 	}
 	return locales.CheckForUpdatesMenu()
+}
+
+// offeredUpdate is the version the app points at: none for a build that
+// cannot install one. Such a build says nothing about updates anywhere — the
+// sidebar, the menus and the tray included.
+func (a *app) offeredUpdate() string {
+	if !a.update.supported {
+		return ""
+	}
+	return a.settings.UpdateAvailable
 }
 
 // refreshTray points the tooltip, and on Linux the menu, at a version a
@@ -83,7 +100,7 @@ func (a *app) refreshTray() {
 		return
 	}
 	tip := "Melo"
-	if v := a.settings.UpdateAvailable; v != "" {
+	if v := a.offeredUpdate(); v != "" {
 		tip = "Melo " + v + locales.IsAvailableSuffix()
 	}
 	a.tray.SetToolTip(tip)

@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"github.com/douglarek/melo/locales"
 )
 
 // stubUpdates replaces the updater with functions of the test, so that the
@@ -118,7 +121,7 @@ func TestUpdateStatusLines(t *testing.T) {
 	stubUpdates(t)
 
 	a := newTestApp(t)
-	a.update = updateStatus{version: "0.2.0"}
+	a.update = updateStatus{supported: true, version: "0.2.0"}
 	if got := a.versionLabel(); got != "版本 0.2.0" {
 		t.Fatalf("versionLabel = %q, want 版本 0.2.0", got)
 	}
@@ -158,6 +161,7 @@ func TestBackgroundCheckBadge(t *testing.T) {
 	updatesWindow = func() { opened++ }
 
 	a := newTestApp(t)
+	a.update = updateStatus{supported: true, version: "0.2.0"}
 	a.settings.CheckUpdates = true
 	a.recordCheck("0.3.0")
 	tt := ui.NewTester(a.view, 1200, 900)
@@ -357,5 +361,59 @@ func TestDevelopmentBuildHidesUpdates(t *testing.T) {
 	// The version is still there, under About.
 	if !tt.HasText("版本 0.3.0") {
 		t.Fatalf("the About section should still name the version, texts: %v", tt.Texts())
+	}
+}
+
+// menuLabels lists what a menu shows, its separators aside.
+func menuLabels(items []*mygo.MenuItem) []string {
+	labels := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.Type == mygo.MenuItemSeparator {
+			continue
+		}
+		labels = append(labels, it.Label)
+	}
+	return labels
+}
+
+// A build that cannot install an update offers no check for one in its tray
+// or its menu bar: the settings page says nothing about updates for it, and a
+// development build has no update item anywhere.
+func TestMenusOfferUpdatesOnlyWhereTheBuildCanInstallThem(t *testing.T) {
+	cannot := []struct {
+		name   string
+		status updateStatus
+	}{
+		{"development build", updateStatus{dev: true}},
+		{"install a package manager owns", updateStatus{version: "0.2.0"}},
+	}
+	for _, tc := range cannot {
+		a := newTestApp(t)
+		a.update = tc.status
+		a.settings.UpdateAvailable = "0.3.0"
+		if labels := menuLabels(a.trayMenu().Items()); slices.Contains(labels, locales.CheckForUpdatesMenu()) {
+			t.Fatalf("%s: the tray offers %q: %v", tc.name, locales.CheckForUpdatesMenu(), labels)
+		}
+		appMenu := a.menuItems("Melo")
+		if labels := menuLabels(appMenu[0].Submenu); slices.Contains(labels, locales.CheckForUpdatesMenu()) {
+			t.Fatalf("%s: the menu bar offers %q: %v", tc.name, locales.CheckForUpdatesMenu(), labels)
+		}
+	}
+
+	// The check stays where the build can install what it finds, and names
+	// the version a background check found.
+	a := newTestApp(t)
+	a.update = updateStatus{supported: true, version: "0.2.0"}
+	if labels := menuLabels(a.trayMenu().Items()); !slices.Contains(labels, locales.CheckForUpdatesMenu()) {
+		t.Fatalf("a build that can install updates offers no check in its tray: %v", labels)
+	}
+	a.settings.UpdateAvailable = "0.3.0"
+	want := locales.UpdateToPrefix() + "0.3.0…"
+	if labels := menuLabels(a.trayMenu().Items()); !slices.Contains(labels, want) {
+		t.Fatalf("the tray item does not name the version found: %v, want %q", labels, want)
+	}
+	appMenu := a.menuItems("Melo")
+	if labels := menuLabels(appMenu[0].Submenu); !slices.Contains(labels, locales.CheckForUpdatesMenu()) {
+		t.Fatalf("a build that can install updates offers no check in its menu bar: %v", labels)
 	}
 }
