@@ -2,7 +2,7 @@
   "name": "Melo",
   "identifier": "vibe.melo",
   "slug": "melo",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "out": "build",
   "icon": "resources/icon.png",
   "resources": [
