@@ -322,8 +322,9 @@ func (a *app) settingsModalView(c *ui.Context) {
 									})
 								})
 							} else {
-								// 由 deb / rpm 等软件包管理器安装的版本，
-								// 不能替换自身：只说去哪儿更新，没有手动检查。
+								// 装成了自己替换不了的样子，无论是包管理器
+								// 装的、只读的位置，还是构建时没带更新配置：
+								// 只说这一点，没有手动检查。
 								ui.Text(c, locales.UpdatesUnavailableHint()).FontSize(11).TextColor(p.muted)
 							}
 						})

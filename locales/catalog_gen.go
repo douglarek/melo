@@ -114,21 +114,21 @@ func (msgs Messages) AudioQuality() string {
 	return Catalog.Format(msgs.locale, "audioQuality", nil)
 }
 
-// AudioQualityHint says "AAC 128 kbps 自适应流（边下边播），不可用时回退 96 kbps"
+// AudioQualityHint says "AAC 128 kbps 自适应流（边下边播），不可用时回退 96 kbps。"
 // in the language the app shows.
 func AudioQualityHint() string { return In(i18n.Locale()).AudioQualityHint() }
 
-// AudioQualityHint says "AAC 128 kbps 自适应流（边下边播），不可用时回退 96 kbps"
+// AudioQualityHint says "AAC 128 kbps 自适应流（边下边播），不可用时回退 96 kbps。"
 // in the language of msgs.
 func (msgs Messages) AudioQualityHint() string {
 	return Catalog.Format(msgs.locale, "audioQualityHint", nil)
 }
 
-// AutoChecksHint says "开启后每天自动检查一次"
+// AutoChecksHint says "开启后每天自动检查一次。"
 // in the language the app shows.
 func AutoChecksHint() string { return In(i18n.Locale()).AutoChecksHint() }
 
-// AutoChecksHint says "开启后每天自动检查一次"
+// AutoChecksHint says "开启后每天自动检查一次。"
 // in the language of msgs.
 func (msgs Messages) AutoChecksHint() string {
 	return Catalog.Format(msgs.locale, "autoChecksHint", nil)
@@ -184,11 +184,11 @@ func (msgs Messages) Cache() string {
 	return Catalog.Format(msgs.locale, "cache", nil)
 }
 
-// CacheHint says "已缓存歌曲将在再次播放时免网络秒开"
+// CacheHint says "已缓存歌曲将在再次播放时免网络秒开。"
 // in the language the app shows.
 func CacheHint() string { return In(i18n.Locale()).CacheHint() }
 
-// CacheHint says "已缓存歌曲将在再次播放时免网络秒开"
+// CacheHint says "已缓存歌曲将在再次播放时免网络秒开。"
 // in the language of msgs.
 func (msgs Messages) CacheHint() string {
 	return Catalog.Format(msgs.locale, "cacheHint", nil)
@@ -204,11 +204,11 @@ func (msgs Messages) CacheInUsePrefix() string {
 	return Catalog.Format(msgs.locale, "cacheInUsePrefix", nil)
 }
 
-// CacheLimitHint says "超出上限时自动清理最久未播放的缓存"
+// CacheLimitHint says "超出上限时自动清理最久未播放的缓存。"
 // in the language the app shows.
 func CacheLimitHint() string { return In(i18n.Locale()).CacheLimitHint() }
 
-// CacheLimitHint says "超出上限时自动清理最久未播放的缓存"
+// CacheLimitHint says "超出上限时自动清理最久未播放的缓存。"
 // in the language of msgs.
 func (msgs Messages) CacheLimitHint() string {
 	return Catalog.Format(msgs.locale, "cacheLimitHint", nil)
@@ -1534,11 +1534,11 @@ func (msgs Messages) SignInDialogDetail() string {
 	return Catalog.Format(msgs.locale, "signInDialogDetail", nil)
 }
 
-// SignInHint says "登录以同步您的云端播放列表与喜爱的音乐"
+// SignInHint says "登录以同步您的云端播放列表与喜爱的音乐。"
 // in the language the app shows.
 func SignInHint() string { return In(i18n.Locale()).SignInHint() }
 
-// SignInHint says "登录以同步您的云端播放列表与喜爱的音乐"
+// SignInHint says "登录以同步您的云端播放列表与喜爱的音乐。"
 // in the language of msgs.
 func (msgs Messages) SignInHint() string {
 	return Catalog.Format(msgs.locale, "signInHint", nil)
@@ -1904,11 +1904,11 @@ func (msgs Messages) UpdateToPrefix() string {
 	return Catalog.Format(msgs.locale, "updateToPrefix", nil)
 }
 
-// UpdatesUnavailableHint says "由软件包管理器（如 .deb / RPM）安装，请在包管理器里更新。"
+// UpdatesUnavailableHint says "当前安装的版本无法更新。"
 // in the language the app shows.
 func UpdatesUnavailableHint() string { return In(i18n.Locale()).UpdatesUnavailableHint() }
 
-// UpdatesUnavailableHint says "由软件包管理器（如 .deb / RPM）安装，请在包管理器里更新。"
+// UpdatesUnavailableHint says "当前安装的版本无法更新。"
 // in the language of msgs.
 func (msgs Messages) UpdatesUnavailableHint() string {
 	return Catalog.Format(msgs.locale, "updatesUnavailableHint", nil)

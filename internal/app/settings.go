@@ -20,9 +20,8 @@ type settings struct {
 	Language string `json:"language,omitempty"`
 	// CheckUpdates reports whether Melo looks for new versions in the
 	// background, and points at them in the sidebar and the tray. It is
-	// off by default: the .deb and the RPM are updated by the package
-	// manager that installed them, so only people who installed the macOS
-	// app or the Windows installer want it.
+	// off by default: a version that cannot replace itself is updated
+	// elsewhere, and has nothing to check for.
 	CheckUpdates bool `json:"checkUpdates"`
 	// UpdateLastCheck is when a check last found out whether a newer
 	// version is out.

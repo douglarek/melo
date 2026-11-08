@@ -47,9 +47,9 @@ var (
 
 // updateStatus is what the settings page says about this build's updates.
 type updateStatus struct {
-	// supported reports whether this build can replace itself: a packaged
-	// build where it may write, not a development build, and not an app a
-	// package manager installed.
+	// supported reports whether this build can replace itself: a build
+	// that carries the update feed and the key, and that may write where
+	// it is installed.
 	supported bool
 	// dev reports a development build, whose settings say nothing about
 	// updates: it cannot install one anyway, and whoever runs it builds it.

@@ -93,24 +93,24 @@ func TestUpdatesUnsupportedHint(t *testing.T) {
 	stubUpdates(t)
 
 	a := newTestApp(t)
-	// A development build, or the app a package manager installed.
+	// A build that cannot replace itself, wherever it was installed.
 	a.update = updateStatus{supported: false, version: "0.2.0"}
 	a.settingsModalOpen = true
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
 
-	if !tt.HasText("由软件包管理器") {
+	if !tt.HasText("当前安装的版本无法更新。") {
 		t.Fatalf("settings should say why updates are unavailable, texts: %v", tt.Texts())
 	}
 	if tt.HasText("自动检查更新") {
 		t.Fatal("a build that cannot update itself should not offer automatic checks")
 	}
-	// No manual check either: the package manager is where it updates.
+	// No manual check either: it is updated elsewhere.
 	if _, ok := tt.Find("检查更新"); ok {
-		t.Fatal("a package manager install should offer no 检查更新 button")
+		t.Fatal("a version that cannot update itself should offer no 检查更新 button")
 	}
 	if tt.HasText("尚未检查更新") {
-		t.Fatalf("a package manager install should say nothing about checks, texts: %v", tt.Texts())
+		t.Fatalf("a version that cannot update itself should say nothing about checks, texts: %v", tt.Texts())
 	}
 }
 
