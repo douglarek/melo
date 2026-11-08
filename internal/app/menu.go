@@ -20,7 +20,7 @@ func (a *app) setMenu() {
 		{Role: mygo.RoleAbout, Label: locales.AboutPrefix() + name},
 		mygo.Separator(),
 		{Label: locales.CheckForUpdatesMenu(), Click: func(*mygo.MenuItem, *mygo.Window) { a.checkUpdates() }},
-		{Label: locales.SettingsMenu(), Accelerator: "CmdOrCtrl+,", Click: run(func() { a.settingsModalOpen = true })},
+		{Label: locales.SettingsMenu(), Accelerator: "CmdOrCtrl+,", Click: run(a.openSettings)},
 		mygo.Separator(),
 	}
 

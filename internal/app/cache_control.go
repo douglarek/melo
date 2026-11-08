@@ -32,21 +32,22 @@ func (a *app) maintenanceLoop(ctx context.Context) {
 }
 
 func (a *app) maintainCache() {
-	if a.art != nil {
-		go a.art.pruneDisk(false)
-	}
 	if a.pl == nil || a.pl.Cache == nil {
 		return
 	}
-	if a.pl.Cache.Limit() == 0 {
-		id := ""
-		if cur := a.pl.Current(); cur != nil {
-			id = cur.ID
-		}
-		a.pl.Cache.ClearExcept(id)
+	cache := a.pl.Cache
+	keep := ""
+	if cur := a.pl.Current(); cur != nil {
+		keep = cur.ID
+	}
+	// The cache counts the audio of tracks with their covers, and prunes one
+	// directory, so the track playing has to be known before it runs.
+	cache.SetKeep(keep)
+	if cache.Limit() == 0 {
+		cache.ClearExcept(keep)
 		return
 	}
-	a.pl.Cache.Prune()
+	cache.Prune()
 }
 
 func (a *app) applyCacheLimit() {

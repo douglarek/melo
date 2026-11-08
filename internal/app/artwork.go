@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -52,8 +51,6 @@ const (
 	maxMosaicEntries = 64
 	maxMosaicBytes   = 32 << 20
 	artLoadWorkers   = 4
-	artDiskLimit     = 256 << 20
-	artDiskPruneAge  = 10 * time.Minute
 )
 
 var artworkSizePattern = regexp.MustCompile(`=w\d+-h\d+`)
@@ -74,10 +71,9 @@ type artCache struct {
 	mosaicLimit int64
 	maxArt      int
 	maxMosaic   int
-	maxDisk     int64
-	lastPrune   time.Time
-	diskMu      sync.Mutex
-	sem         chan struct{}
+	// The covers on disk share the cache's limit, which prunes them as the
+	// files used longest ago: this cache keeps them in memory only.
+	sem chan struct{}
 }
 
 func newArtCache(post func(func()), dir string) *artCache {
@@ -92,7 +88,6 @@ func newArtCache(post func(func()), dir string) *artCache {
 		maxArt:      maxArtEntries,
 		maxMosaic:   maxMosaicEntries,
 		mosaicLimit: maxMosaicBytes,
-		maxDisk:     artDiskLimit,
 		sem:         make(chan struct{}, artLoadWorkers),
 	}
 }
@@ -367,63 +362,6 @@ func writeArtworkDisk(dir, key string, data []byte) error {
 	return os.Rename(tmpName, artworkDiskPath(dir, key))
 }
 
-func (c *artCache) pruneDisk(force bool) {
-	if c.dir == "" || c.maxDisk <= 0 {
-		return
-	}
-	c.diskMu.Lock()
-	defer c.diskMu.Unlock()
-
-	now := time.Now()
-	if !force && !c.lastPrune.IsZero() && now.Sub(c.lastPrune) < artDiskPruneAge {
-		return
-	}
-	c.lastPrune = now
-
-	entries, err := os.ReadDir(c.dir)
-	if err != nil {
-		return
-	}
-	type diskFile struct {
-		path string
-		size int64
-		mod  time.Time
-	}
-	var files []diskFile
-	var total int64
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, diskFile{
-			path: filepath.Join(c.dir, entry.Name()),
-			size: info.Size(),
-			mod:  info.ModTime(),
-		})
-		total += info.Size()
-	}
-	if total <= c.maxDisk {
-		return
-	}
-
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].mod.Before(files[j].mod)
-	})
-	target := c.maxDisk * 9 / 10
-	for _, file := range files {
-		if total <= target {
-			return
-		}
-		if err := os.Remove(file.path); err == nil {
-			total -= file.size
-		}
-	}
-}
-
 func (c *artCache) Clear() {
 	c.mu.Lock()
 	c.art = map[string]*artwork{}
@@ -438,10 +376,7 @@ func (c *artCache) Clear() {
 	if c.dir == "" {
 		return
 	}
-	c.diskMu.Lock()
-	defer c.diskMu.Unlock()
 	_ = os.RemoveAll(c.dir)
-	c.lastPrune = time.Time{}
 }
 
 // fitArtwork downscales large covers to the requested cache side.

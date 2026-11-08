@@ -92,3 +92,12 @@ func (s *settings) applyAppearance() {
 		setThemeSource(mygo.ThemeSystem)
 	}
 }
+
+// openSettings opens the settings window, counting what the cache holds first
+// so that what it says of it is what the disk has now.
+func (a *app) openSettings() {
+	if a.pl != nil && a.pl.Cache != nil {
+		a.pl.Cache.Refresh()
+	}
+	a.settingsModalOpen = true
+}

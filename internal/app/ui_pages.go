@@ -675,7 +675,7 @@ func (a *app) renderCardWithArt(c *ui.Context, item ytmusic.CardItem, loadArt bo
 		case "podcast":
 			a.open(route{page: pagePlaylist, id: item.ID})
 		case "profile":
-			a.settingsModalOpen = true
+			a.openSettings()
 		default:
 			if item.Track != nil {
 				a.pl.PlayTrack(*item.Track)

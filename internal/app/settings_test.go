@@ -1,9 +1,13 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/douglarek/melo/internal/player"
 )
 
 func TestCloseToTraySetting(t *testing.T) {
@@ -76,5 +80,38 @@ func TestTrackNotificationsSetting(t *testing.T) {
 	}
 	if !a.settings.TrackNotifications {
 		t.Fatal("notifications were not enabled")
+	}
+}
+
+// TestOpenSettingsCountsTheWholeCache checks that the size the settings window
+// reports is what the disk holds: the audio of tracks, the covers and what a
+// download left behind, not the audio alone.
+func TestOpenSettingsCountsTheWholeCache(t *testing.T) {
+	a := newTestApp(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cache := player.NewCache(cacheDir, 1<<30)
+	files := map[string]int{
+		filepath.Join(cacheDir, "a.mp4"):           3,
+		filepath.Join(cache.SabrDir(), "b.m4a"):    5,
+		filepath.Join(cache.ArtworkDir(), "c.jpg"): 7,
+		filepath.Join(cacheDir, "d.mp4.part"):      11,
+	}
+	for path, size := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	a.pl.Cache = cache
+
+	a.openSettings()
+
+	if !a.settingsModalOpen {
+		t.Fatal("the settings window was not opened")
+	}
+	if got, want := cache.Size(), int64(26); got != want {
+		t.Fatalf("the cache reports %d bytes, want %d", got, want)
 	}
 }

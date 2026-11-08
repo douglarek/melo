@@ -733,11 +733,9 @@ func (c *Client) startSabrSession(ctx context.Context, stream *SabrStream, token
 	go func() {
 		err := c.runSabr(runCtx, stream, token, sess)
 		if err == nil {
-			if werr := os.WriteFile(dest+".ok", []byte(size), 0o644); werr != nil {
-				err = werr
-			} else {
-				pruneSabrDir(filepath.Dir(dest), filepath.Base(dest))
-			}
+			// The app's cache prunes the directory, under the limit the user
+			// chose: keep the drained file, marker and all, until then.
+			err = os.WriteFile(dest+".ok", []byte(size), 0o644)
 		}
 		sess.finish(err)
 	}()
@@ -977,43 +975,6 @@ func (c *Client) SetSabr(tokens POTProvider, dir string) {
 	c.mu.Unlock()
 }
 
-// pruneSabrDir keeps the drained files under limit bytes, oldest first,
-// never removing keep.
-func pruneSabrDir(dir, keep string) {
-	const limit = int64(512 << 20)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	type file struct {
-		path string
-		size int64
-		mod  time.Time
-	}
-	var files []file
-	var total int64
-	for _, e := range entries {
-		if e.IsDir() || e.Name() == keep {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, file{path: filepath.Join(dir, e.Name()), size: info.Size(), mod: info.ModTime()})
-		total += info.Size()
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
-	for _, f := range files {
-		if total <= limit {
-			break
-		}
-		if err := os.Remove(f.path); err == nil {
-			total -= f.size
-		}
-	}
-}
-
 func (c *Client) sabrInfo(videoID, dest string, s *SabrStream) *StreamInfo {
 	return &StreamInfo{
 		VideoID:       videoID,
@@ -1050,6 +1011,10 @@ func (c *Client) resolveSabrFile(ctx context.Context, videoID string) (*StreamIn
 	size := strconv.FormatInt(s.Format.ContentLength, 10)
 	if st, err := os.Stat(dest); err == nil && st.Size() == s.Format.ContentLength {
 		if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == size {
+			// Playing it counts as using it, for the cache that prunes what
+			// was played longest ago.
+			now := time.Now()
+			_ = os.Chtimes(dest, now, now)
 			return c.sabrInfo(videoID, dest, s), nil
 		}
 	}

@@ -143,35 +143,6 @@ func TestLoadArtworkFromDisk(t *testing.T) {
 	}
 }
 
-func TestArtCachePrunesDisk(t *testing.T) {
-	dir := t.TempDir()
-	c := newArtCache(nil, dir)
-	c.maxDisk = 100
-	now := time.Now()
-	oldPath := filepath.Join(dir, "old.jpg")
-	newPath := filepath.Join(dir, "new.jpg")
-	if err := os.WriteFile(oldPath, make([]byte, 80), 0o600); err != nil {
-		t.Fatalf("write old: %v", err)
-	}
-	if err := os.WriteFile(newPath, make([]byte, 80), 0o600); err != nil {
-		t.Fatalf("write new: %v", err)
-	}
-	if err := os.Chtimes(oldPath, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
-		t.Fatalf("age old: %v", err)
-	}
-	if err := os.Chtimes(newPath, now, now); err != nil {
-		t.Fatalf("age new: %v", err)
-	}
-
-	c.pruneDisk(true)
-	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
-		t.Fatal("old disk artwork was not pruned")
-	}
-	if _, err := os.Stat(newPath); err != nil {
-		t.Fatalf("new disk artwork was removed: %v", err)
-	}
-}
-
 func TestArtCacheClearRemovesDisk(t *testing.T) {
 	dir := t.TempDir()
 	c := newArtCache(nil, dir)

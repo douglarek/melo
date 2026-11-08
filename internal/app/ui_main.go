@@ -218,7 +218,7 @@ func (a *app) sidebar(c *ui.Context) {
 				})
 			})
 			if userRow.Clicked() {
-				a.settingsModalOpen = true
+				a.openSettings()
 			}
 		}
 	})

@@ -225,16 +225,19 @@ func Run() error {
 		}
 		limit := cacheLimitBytes(a.settings.CacheMB)
 		songCache := player.NewCache(cacheDir, limit)
+		if freed := songCache.Migrate(); freed > 0 {
+			log.Printf("cache: dropped %s that no version reads any more", formatBytes(freed))
+		}
 		if limit == 0 {
 			songCache.Clear()
 		} else {
 			songCache.Prune()
 		}
 
-		a.art = newArtCache(a.post, filepath.Join(cacheDir, "artwork"))
+		a.art = newArtCache(a.post, songCache.ArtworkDir())
 		a.pot = newPOTProvider()
 		a.pot.start()
-		ytmusic.DefaultClient.SetSabr(a.pot, filepath.Join(cacheDir, "sabr"))
+		ytmusic.DefaultClient.SetSabr(a.pot, songCache.SabrDir())
 		a.pl = player.New(a.post)
 		a.pl.SetContext(a.ctx)
 		a.pl.Cache = songCache
