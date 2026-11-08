@@ -207,11 +207,17 @@ func Run() error {
 	mygo.App.WhenReady(func() {
 		secureUserDataDir()
 		// Drop cookies that older builds left in the persistent WebView
-		// session; the app's own session lives in session.json.
-		go func() {
-			_ = mygo.DefaultSession().ClearData(mygo.SiteDataAll)
-			secureUserDataDir()
-		}()
+		// session, once: the app's own session lives in session.json, and the
+		// clear opens WebKit's network process, which stays for the run.
+		if !webViewCleared() {
+			go func() {
+				if err := mygo.DefaultSession().ClearData(mygo.SiteDataAll); err != nil {
+					return
+				}
+				secureUserDataDir()
+				markWebViewCleared()
+			}()
+		}
 		a.settings = loadSettings()
 		a.applyLanguage()
 		a.settings.applyAppearance()
@@ -236,7 +242,6 @@ func Run() error {
 
 		a.art = newArtCache(a.post, songCache.ArtworkDir())
 		a.pot = newPOTProvider()
-		a.pot.start()
 		ytmusic.DefaultClient.SetSabr(a.pot, songCache.SabrDir())
 		a.pl = player.New(a.post)
 		a.pl.SetContext(a.ctx)

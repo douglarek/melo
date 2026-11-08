@@ -53,3 +53,26 @@ func (a *app) clearDefaultBrowserData() {
 		_ = mygo.DefaultSession().ClearData(mygo.SiteDataAll)
 	}()
 }
+
+// webViewClearedMark names the file that says the cookies older builds left in
+// the persistent WebView session are gone.
+const webViewClearedMark = "webview-cleared"
+
+// webViewCleared reports whether those cookies were dropped already.
+func webViewCleared() bool {
+	path, err := userDataFile(webViewClearedMark)
+	if err != nil {
+		return true // nowhere to keep the mark: do not clear on every launch
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
+// markWebViewCleared records that they were.
+func markWebViewCleared() {
+	path, err := userDataFile(webViewClearedMark)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte("1\n"), 0o600)
+}

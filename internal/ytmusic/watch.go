@@ -579,7 +579,7 @@ func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo
 		}
 	}
 
-	if sabrErr != nil && strings.Contains(sabrErr.Error(), "UNPLAYABLE") {
+	if errors.Is(sabrErr, ErrUnavailable) {
 		return nil, ErrUnavailable
 	}
 	return c.ResolveHLS(ctx, videoID)

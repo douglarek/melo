@@ -37,6 +37,13 @@ type Client struct {
 	cookie     string
 	sabrTokens POTProvider
 	sabrDir    string
+	// sabrCred is the visitor the SABR path speaks as and its PO token, one
+	// mint serving many tracks; sabrCredGen names it, so that a refusal
+	// invalidates the pair it was playing with and not a newer one.
+	sabrCred    *sabrCredential
+	sabrCredGen uint64
+	// sabrMintMu holds the one mint at a time a session does.
+	sabrMintMu sync.Mutex
 }
 
 // DefaultClient is the package-level client.

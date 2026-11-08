@@ -2,8 +2,17 @@ package ytmusic
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 // umpEncode writes a UMP varint, the leading bits carrying the width.
@@ -145,5 +154,159 @@ func TestDecodeBase64Any(t *testing.T) {
 		if !bytes.Equal(got, raw) {
 			t.Fatalf("%q -> %x", s, got)
 		}
+	}
+}
+
+// countingTokens is a POTProvider that counts the tokens it minted.
+type countingTokens struct {
+	mu    sync.Mutex
+	mints int
+}
+
+func (c *countingTokens) Token(ctx context.Context, binding string) (string, error) {
+	c.mu.Lock()
+	c.mints++
+	c.mu.Unlock()
+	return base64.StdEncoding.EncodeToString([]byte("token")), nil
+}
+
+func (c *countingTokens) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mints
+}
+
+// TestDrainedTrackNeedsNoCredential checks that a track whose download
+// finished plays from its file, with no visitor asked for, no token minted and
+// no request made.
+func TestDrainedTrackNeedsNoCredential(t *testing.T) {
+	dir := t.TempDir()
+	const id = "drained"
+	dest := filepath.Join(dir, id+".m4a")
+	if err := os.WriteFile(dest, make([]byte, 32), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(dest+".ok", []byte("32"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	tokens := &countingTokens{}
+	c := NewClient()
+	c.SetSabr(tokens, dir)
+
+	info, err := c.resolveSabrFile(t.Context(), id)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if info.LocalPath != dest || info.ContentLength != 32 {
+		t.Fatalf("info = %+v, want the file at %s", info, dest)
+	}
+	if got := tokens.count(); got != 0 {
+		t.Fatalf("minted %d tokens for a drained track", got)
+	}
+}
+
+// TestDrainedFileChecksTheMarker checks what makes a file drained.
+func TestDrainedFileChecksTheMarker(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "track.m4a")
+	if err := os.WriteFile(dest, make([]byte, 10), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, ok := drainedFile("track", dest); ok {
+		t.Fatal("a file with no marker played as drained")
+	}
+	if err := os.WriteFile(dest+".ok", []byte("11"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if _, ok := drainedFile("track", dest); ok {
+		t.Fatal("a file shorter than its marker played as drained")
+	}
+	if err := os.WriteFile(dest+".ok", []byte("10"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if _, ok := drainedFile("track", dest); !ok {
+		t.Fatal("a file its marker matches did not play as drained")
+	}
+}
+
+// TestSabrRetrySaysWhatAFailureIsWorth checks which failures mint another
+// token, which get one more try as they are, and which end the attempt.
+func TestSabrRetrySaysWhatAFailureIsWorth(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"forbidden", &sabrStatusError{code: http.StatusForbidden}, sabrRetryCredential},
+		{"bad request", &sabrStatusError{code: http.StatusBadRequest}, sabrRetryCredential},
+		{"unauthorized", &sabrStatusError{code: http.StatusUnauthorized}, sabrRetryCredential},
+		{"server error", &sabrStatusError{code: http.StatusBadGateway}, sabrRetryNo},
+		{"attestation", errSabrAttestation, sabrRetryCredential},
+		{"rejected", fmt.Errorf("%w: 0a0b", errSabrRejected), sabrRetryCredential},
+		{"no stream", fmt.Errorf("%w: no streamingData", errSabrNoStream), sabrRetryCredential},
+		{"playback refused", &sabrPlaybackError{status: "LOGIN_REQUIRED"}, sabrRetryCredential},
+		{"unavailable", fmt.Errorf("sabr player: %w", ErrUnavailable), sabrRetryNo},
+		{"cancelled", context.Canceled, sabrRetryNo},
+		{"timed out", context.DeadlineExceeded, sabrRetryTransient},
+		{"network", errors.New("dial tcp: no route to host"), sabrRetryTransient},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sabrRetryFor(tc.err); got != tc.want {
+				t.Fatalf("sabrRetryFor(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSabrRefusalWantsAnotherToken checks that a 403 from the SABR endpoint,
+// as a stale token gets, is a failure another mint may pass.
+func TestSabrRefusalWantsAnotherToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	stream := &SabrStream{VideoID: "track", URL: srv.URL, Format: SabrFormat{ContentLength: 64}}
+	token := base64.StdEncoding.EncodeToString([]byte("token"))
+	_, err := c.startSabrSession(t.Context(), stream, token, filepath.Join(t.TempDir(), "track.m4a"))
+	if err == nil {
+		t.Fatal("a refused stream started")
+	}
+	if got := sabrRetryFor(err); got != sabrRetryCredential {
+		t.Fatalf("sabrRetryFor(%v) = %d, want %d", err, got, sabrRetryCredential)
+	}
+}
+
+// TestSabrCredentialServesManyTracks checks that a fresh pair is reused, and
+// that only the pair a refusal used is dropped.
+func TestSabrCredentialServesManyTracks(t *testing.T) {
+	tokens := &countingTokens{}
+	c := NewClient()
+	c.SetSabr(tokens, t.TempDir())
+	c.sabrCred = &sabrCredential{visitor: "visitor", token: "token", minted: time.Now(), gen: 7}
+
+	for _, id := range []string{"first", "second"} {
+		cred, err := c.sabrCredential(t.Context(), id)
+		if err != nil {
+			t.Fatalf("credential for %s: %v", id, err)
+		}
+		if cred.visitor != "visitor" || cred.token != "token" || cred.gen != 7 {
+			t.Fatalf("credential for %s = %+v, want the one at hand", id, cred)
+		}
+	}
+	if got := tokens.count(); got != 0 {
+		t.Fatalf("minted %d tokens with a fresh pair at hand", got)
+	}
+
+	c.dropSabrCredential(6)
+	if c.sabrCred == nil {
+		t.Fatal("dropped a pair another attempt was using")
+	}
+	c.dropSabrCredential(7)
+	if c.sabrCred != nil {
+		t.Fatal("the pair a refusal used stayed")
 	}
 }

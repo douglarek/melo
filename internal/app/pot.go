@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,79 +80,111 @@ func (p *Pot) Fetch(ctx context.Context, req PotFetchRequest) (PotFetchResponse,
 const defaultPOUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
 // potProvider mints visitor-bound PO tokens in a hidden window, where the
-// BotGuard interpreter runs against a real DOM.
+// BotGuard interpreter runs against a real DOM. The window lives only while a
+// token is minted: one serves the tracks of a session, so WebKit's processes
+// are gone the rest of the time, their 80 MB with them.
 type potProvider struct {
+	// mu guards the window against a close while it opens, and the idle timer.
 	mu    sync.Mutex
 	win   *mygo.Window
 	ready bool
+	idle  *time.Timer
+	// used is when a token was last minted, for the timer that closes a
+	// window that has served its mint.
+	used time.Time
+	// mintMu holds the one mint at a time a session does.
+	mintMu sync.Mutex
 }
+
+const (
+	// potIdle is how long the window stays after a mint, for a session that
+	// mints again soon, as a stream refused and its retry do.
+	potIdle = 30 * time.Second
+	// potReadyLimit is how long the page may take to be ready.
+	potReadyLimit = 5 * time.Second
+	// potMintLimit is how long a mint may take.
+	potMintLimit = 10 * time.Second
+)
 
 func newPOTProvider() *potProvider { return &potProvider{} }
 
-func (p *potProvider) start() {
-	_ = mygo.Protocol.HandleFunc("pot", func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/")
-		if name == "" {
-			name = "pot_page.html"
-		}
-		data, err := potFS.ReadFile(name)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		if strings.HasSuffix(name, ".html") {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		} else {
-			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		}
-		_, _ = w.Write(data)
-	})
-	p.win = mygo.NewWindow(mygo.WindowOptions{
+// potPage returns the token page with the BotGuard client in it: the page
+// loads with no request of its own.
+func potPage() string {
+	page, _ := potFS.ReadFile("pot_page.html")
+	client, _ := potFS.ReadFile("bgutils.js")
+	return strings.Replace(string(page), `<script src="bgutils.js"></script>`, "<script>"+string(client)+"</script>", 1)
+}
+
+// open returns the page of a window that has the token page ready, opening
+// one when none is.
+func (p *potProvider) open(ctx context.Context) (*mygo.Page, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.win != nil && p.ready {
+		return p.win.Page(), nil
+	}
+	if p.win != nil {
+		p.win.Close()
+		p.win = nil
+		p.ready = false
+	}
+	win := mygo.NewWindow(mygo.WindowOptions{
 		Hidden: true,
 		Width:  480,
 		Height: 360,
-		URL:    "pot://localhost/",
 	})
-}
-
-func (p *potProvider) waitReady(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ready {
-		return nil
-	}
-	if p.win == nil || p.win.Page() == nil {
-		return errors.New("pot: page not started")
-	}
-	deadline := time.Now().Add(20 * time.Second)
+	page := win.Page()
+	page.LoadHTML(potPage(), "")
+	deadline := time.Now().Add(potReadyLimit)
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			win.Close()
+			return nil, err
 		}
-		v, err := p.win.Page().EvalContext(ctx, "document.readyState === 'complete' && window.potReady === true")
-		if err == nil && v == true {
-			p.ready = true
-			return nil
+		if v, err := page.EvalContext(ctx, "document.readyState === 'complete' && window.potReady === true"); err == nil && v == true {
+			break
 		}
 		if time.Now().After(deadline) {
-			return errors.New("pot: page not ready")
+			win.Close()
+			return nil, errors.New("pot: page not ready")
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
+	p.win, p.ready = win, true
+	return page, nil
 }
 
-// Token mints a PO token bound to binding, a visitor data or a video id.
+// Token mints a PO token bound to binding, opening the window it needs and
+// closing it once it has served, some time after the mint.
 func (p *potProvider) Token(ctx context.Context, binding string) (string, error) {
-	if err := p.waitReady(ctx); err != nil {
+	p.mintMu.Lock()
+	defer p.mintMu.Unlock()
+	p.stopIdle()
+	page, err := p.open(ctx)
+	if err != nil {
+		p.closeWindow()
 		return "", err
 	}
-	page := p.win.Page()
-	code := "return await window.mintPoToken(" + strconv.Quote(binding) + ")"
-	v, err := page.EvalContext(ctx, code)
-	if err != nil || v == nil {
-		_, _ = page.EvalContext(ctx, "window.resetPoMinter && window.resetPoMinter(); true")
-		v, err = page.EvalContext(ctx, code)
+	defer p.armIdle()
+
+	start := time.Now()
+	token, err := p.mint(ctx, page, binding)
+	if err == nil {
+		log.Printf("pot: minted a token in %v", time.Since(start).Round(time.Millisecond))
+		return token, nil
 	}
+	log.Printf("pot: mint failed (%v), starting the page over", err)
+	// A page whose BotGuard got stuck mints after it starts over.
+	_, _ = page.EvalContext(ctx, "window.resetPoMinter && window.resetPoMinter(); true")
+	return p.mint(ctx, page, binding)
+}
+
+// mint asks the page for a token bound to binding.
+func (p *potProvider) mint(ctx context.Context, page *mygo.Page, binding string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, potMintLimit)
+	defer cancel()
+	v, err := page.EvalContext(ctx, "return await window.mintPoToken("+strconv.Quote(binding)+")")
 	if err != nil {
 		return "", err
 	}
@@ -162,14 +195,64 @@ func (p *potProvider) Token(ctx context.Context, binding string) (string, error)
 	return token, nil
 }
 
-func (p *potProvider) close() {
+// armIdle closes the window once it has served nothing for potIdle.
+func (p *potProvider) armIdle() {
+	p.mu.Lock()
+	p.used = time.Now()
+	if p.idle != nil {
+		p.idle.Stop()
+	}
+	p.idle = time.AfterFunc(potIdle, p.idleClose)
+	p.mu.Unlock()
+}
+
+// idleClose closes the window if no mint has used it since it was armed: a
+// mint that started meanwhile arms another.
+func (p *potProvider) idleClose() {
+	p.mu.Lock()
+	if time.Since(p.used) < potIdle {
+		p.idle.Stop()
+		p.idle = time.AfterFunc(potIdle-time.Since(p.used), p.idleClose)
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
+
+	p.mintMu.Lock()
+	defer p.mintMu.Unlock()
+	p.closeWindow()
+}
+
+func (p *potProvider) stopIdle() {
+	p.mu.Lock()
+	if p.idle != nil {
+		p.idle.Stop()
+		p.idle = nil
+	}
+	p.mu.Unlock()
+}
+
+// closeWindow closes the window the token page ran in, and WebKit's processes
+// with it, a few seconds later.
+func (p *potProvider) closeWindow() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.idle != nil {
+		p.idle.Stop()
+		p.idle = nil
+	}
 	if p.win != nil {
+		log.Print("pot: closing the token window")
 		p.win.Close()
 		p.win = nil
 	}
 	p.ready = false
+}
+
+// close closes the window for good, as the app quits.
+func (p *potProvider) close() {
+	p.stopIdle()
+	p.closeWindow()
 }
 
 var _ ytmusic.POTProvider = (*potProvider)(nil)

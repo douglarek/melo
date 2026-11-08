@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -376,19 +377,22 @@ func (c *Client) resolveSabr(ctx context.Context, videoID, visitor string) (*Sab
 	}
 	ps, _ := resp["playabilityStatus"].(map[string]any)
 	if status, _ := ps["status"].(string); status != "OK" {
-		return nil, fmt.Errorf("sabr player: %s", status)
+		if status == "UNPLAYABLE" {
+			return nil, fmt.Errorf("sabr player: %w", ErrUnavailable)
+		}
+		return nil, &sabrPlaybackError{status: status}
 	}
 	sd, _ := resp["streamingData"].(map[string]any)
 	if sd == nil {
-		return nil, errors.New("sabr player: no streamingData")
+		return nil, fmt.Errorf("%w: no streamingData", errSabrNoStream)
 	}
 	sabrURL, _ := sd["serverAbrStreamingUrl"].(string)
 	if sabrURL == "" {
-		return nil, errors.New("sabr player: no serverAbrStreamingUrl")
+		return nil, fmt.Errorf("%w: no serverAbrStreamingUrl", errSabrNoStream)
 	}
 	format, ok := pickSabrAudio(sd)
 	if !ok {
-		return nil, errors.New("sabr player: no AAC audio format")
+		return nil, fmt.Errorf("%w: no AAC audio format", errSabrNoStream)
 	}
 	ust := ""
 	if pc, ok := resp["playerConfig"].(map[string]any); ok {
@@ -399,7 +403,7 @@ func (c *Client) resolveSabr(ctx context.Context, videoID, visitor string) (*Sab
 		}
 	}
 	if ust == "" {
-		return nil, errors.New("sabr player: no ustreamer config")
+		return nil, fmt.Errorf("%w: no ustreamer config", errSabrNoStream)
 	}
 	ustBytes, err := decodeBase64Any(ust)
 	if err != nil {
@@ -809,7 +813,7 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 			return readErr
 		}
 		if resp.StatusCode >= 400 {
-			return fmt.Errorf("sabr: HTTP %d", resp.StatusCode)
+			return &sabrStatusError{code: resp.StatusCode}
 		}
 		parts, err := parseUMP(data)
 		if err != nil {
@@ -906,11 +910,11 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 			case umpProtection:
 				if fields, err := protoParse(p.payload); err == nil {
 					if v := fields[1]; len(v) > 0 && v[0].varint >= 3 {
-						return errors.New("sabr: stream needs attestation")
+						return errSabrAttestation
 					}
 				}
 			case umpSabrError:
-				return fmt.Errorf("sabr: server error: %x", p.payload)
+				return fmt.Errorf("%w: %x", errSabrRejected, p.payload)
 			}
 		}
 		for _, h := range headers {
@@ -975,6 +979,126 @@ func (c *Client) SetSabr(tokens POTProvider, dir string) {
 	c.mu.Unlock()
 }
 
+// sabrStatusError is a SABR request the server answered with a status of its
+// own: 403 says the token or the visitor was refused, 5xx says nothing of it.
+type sabrStatusError struct{ code int }
+
+func (e *sabrStatusError) Error() string { return "sabr: HTTP " + strconv.Itoa(e.code) }
+
+// sabrPlaybackError is a player response that did not say OK.
+type sabrPlaybackError struct{ status string }
+
+func (e *sabrPlaybackError) Error() string { return "sabr player: " + e.status }
+
+var (
+	// errSabrAttestation says the stream wants attestation the request lacked.
+	errSabrAttestation = errors.New("sabr: stream needs attestation")
+	// errSabrRejected says the server refused the request itself.
+	errSabrRejected = errors.New("sabr: the server rejected the request")
+	// errSabrNoStream says the player response carried no stream to play.
+	errSabrNoStream = errors.New("sabr player: no stream")
+)
+
+// What a failed attempt is worth.
+const (
+	// sabrRetryNo is for what another attempt cannot mend: a track that is not
+	// there, a call the app cancelled, a server error no token changes.
+	sabrRetryNo = iota
+	// sabrRetryCredential is for a visitor or token refused, which a fresh
+	// mint may pass where the one at hand did not.
+	sabrRetryCredential
+	// sabrRetryTransient is for a stream that did not come through with a
+	// token the server did not refuse: worth one more try as it is.
+	sabrRetryTransient
+)
+
+// sabrRetryFor says what a failed attempt is worth.
+func sabrRetryFor(err error) int {
+	if errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) {
+		return sabrRetryNo
+	}
+	var status *sabrStatusError
+	if errors.As(err, &status) {
+		switch status.code {
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			return sabrRetryCredential
+		}
+		return sabrRetryNo
+	}
+	var playback *sabrPlaybackError
+	if errors.As(err, &playback) {
+		return sabrRetryCredential
+	}
+	if errors.Is(err, errSabrAttestation) || errors.Is(err, errSabrRejected) || errors.Is(err, errSabrNoStream) {
+		return sabrRetryCredential
+	}
+	return sabrRetryTransient
+}
+
+// sabrTokenTTL is how long a minted token serves the tracks of a session:
+// tokens last hours, and a stream refused sooner mints another anyway.
+const sabrTokenTTL = 6 * time.Hour
+
+// sabrCredential is the visitor the SABR path speaks as, and the PO token
+// bound to it. One of them serves the tracks of a session, where minting one
+// per track cost a request and a second of the next track's start.
+type sabrCredential struct {
+	visitor string
+	token   string
+	minted  time.Time
+	gen     uint64
+}
+
+// sabrCredential returns the visitor and token to play with, minting a pair
+// when none is at hand or the one at hand has expired.
+func (c *Client) sabrCredential(ctx context.Context, videoID string) (sabrCredential, error) {
+	c.mu.RLock()
+	tokens, cred := c.sabrTokens, c.sabrCred
+	c.mu.RUnlock()
+	if tokens == nil {
+		return sabrCredential{}, errors.New("sabr: not configured")
+	}
+	if cred != nil && time.Since(cred.minted) < sabrTokenTTL {
+		return *cred, nil
+	}
+
+	// One mint at a time: a second resolve waits for the pair rather than
+	// starting a window of its own.
+	c.sabrMintMu.Lock()
+	defer c.sabrMintMu.Unlock()
+	c.mu.RLock()
+	cred = c.sabrCred
+	c.mu.RUnlock()
+	if cred != nil && time.Since(cred.minted) < sabrTokenTTL {
+		return *cred, nil
+	}
+
+	visitor, err := c.freshVisitorData(ctx, videoID)
+	if err != nil {
+		return sabrCredential{}, err
+	}
+	token, err := tokens.Token(ctx, visitor)
+	if err != nil {
+		return sabrCredential{}, err
+	}
+	c.mu.Lock()
+	c.sabrCredGen++
+	cred = &sabrCredential{visitor: visitor, token: token, minted: time.Now(), gen: c.sabrCredGen}
+	c.sabrCred = cred
+	c.mu.Unlock()
+	return *cred, nil
+}
+
+// dropSabrCredential forgets the pair a refused stream used, unless another
+// mint replaced it meanwhile.
+func (c *Client) dropSabrCredential(gen uint64) {
+	c.mu.Lock()
+	if c.sabrCred != nil && c.sabrCred.gen == gen {
+		c.sabrCred = nil
+	}
+	c.mu.Unlock()
+}
+
 func (c *Client) sabrInfo(videoID, dest string, s *SabrStream) *StreamInfo {
 	return &StreamInfo{
 		VideoID:       videoID,
@@ -995,38 +1119,84 @@ func (c *Client) resolveSabrFile(ctx context.Context, videoID string) (*StreamIn
 	if tokens == nil || dir == "" {
 		return nil, errors.New("sabr: not configured")
 	}
-	visitor, err := c.freshVisitorData(ctx, videoID)
-	if err != nil {
-		return nil, err
-	}
-	s, err := c.resolveSabr(ctx, videoID, visitor)
-	if err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	dest := filepath.Join(dir, videoID+".m4a")
-	marker := dest + ".ok"
-	size := strconv.FormatInt(s.Format.ContentLength, 10)
-	if st, err := os.Stat(dest); err == nil && st.Size() == s.Format.ContentLength {
-		if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == size {
-			// Playing it counts as using it, for the cache that prunes what
-			// was played longest ago.
-			now := time.Now()
-			_ = os.Chtimes(dest, now, now)
-			return c.sabrInfo(videoID, dest, s), nil
+
+	// A track drained already plays from the file: no visitor, no token.
+	if info, ok := drainedFile(videoID, dest); ok {
+		now := time.Now()
+		_ = os.Chtimes(dest, now, now)
+		return info, nil
+	}
+
+	// One refusal with a visitor that answered before is the visitor's or its
+	// token's, and the next attempt mints another; anything else gets one
+	// more try with the token at hand.
+	var lastErr error
+	for attempt := range 2 {
+		cred, err := c.sabrCredential(ctx, videoID)
+		if err != nil {
+			return nil, err
+		}
+		info, err := c.resolvedSabrFile(ctx, videoID, dest, cred)
+		if err == nil {
+			return info, nil
+		}
+		lastErr = err
+		switch sabrRetryFor(err) {
+		case sabrRetryCredential:
+			log.Printf("sabr: %v with the token at hand, minting another", err)
+			c.dropSabrCredential(cred.gen)
+		case sabrRetryTransient:
+			if attempt == 0 {
+				continue
+			}
+			return nil, err
+		default:
+			return nil, err
 		}
 	}
-	token, err := tokens.Token(ctx, visitor)
+	return nil, lastErr
+}
+
+// resolvedSabrFile drains videoID into dest with cred, and returns the stream
+// to play.
+func (c *Client) resolvedSabrFile(ctx context.Context, videoID, dest string, cred sabrCredential) (*StreamInfo, error) {
+	s, err := c.resolveSabr(ctx, videoID, cred.visitor)
 	if err != nil {
 		return nil, err
 	}
-	sess, err := c.startSabrSession(ctx, s, token, dest)
+	sess, err := c.startSabrSession(ctx, s, cred.token, dest)
 	if err != nil {
 		return nil, err
 	}
 	info := c.sabrInfo(videoID, dest, s)
 	info.Sabr = sess
 	return info, nil
+}
+
+// drainedFile returns the stream of a track whose download finished, as the
+// marker that finished it records, without asking the server: what the file
+// needs of it, the decoder reads from the file.
+func drainedFile(videoID, dest string) (*StreamInfo, bool) {
+	marker, err := os.ReadFile(dest + ".ok")
+	if err != nil {
+		return nil, false
+	}
+	want, err := strconv.ParseInt(strings.TrimSpace(string(marker)), 10, 64)
+	if err != nil || want <= 0 {
+		return nil, false
+	}
+	st, err := os.Stat(dest)
+	if err != nil || st.Size() != want {
+		return nil, false
+	}
+	return &StreamInfo{
+		VideoID:       videoID,
+		Format:        "file",
+		LocalPath:     dest,
+		ContentLength: want,
+	}, true
 }
