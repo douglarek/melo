@@ -306,26 +306,26 @@ func (a *app) settingsModalView(c *ui.Context) {
 									a.setUpdateChecks(a.settings.CheckUpdates)
 								}
 								ui.Text(c, locales.AutoChecksHint()).FontSize(11).TextColor(p.muted)
+
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+									ui.Text(c, a.updateStatusLine()).FontSize(11).TextColor(p.muted)
+									ui.Spacer(c)
+									checkBtn := ui.Row(c.Key("check-updates")).Height(30).Radius(15).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+									if checkBtn.Hovered() {
+										checkBtn.Background(p.hover)
+									}
+									if checkBtn.Clicked() {
+										a.checkUpdates()
+									}
+									checkBtn.Children(func() {
+										ui.Text(c, locales.CheckForUpdates()).FontSize(12).TextColor(p.accent)
+									})
+								})
 							} else {
 								// 由 deb / rpm 等软件包管理器安装的版本，
-								// 不能替换自身。
+								// 不能替换自身：只说去哪儿更新，没有手动检查。
 								ui.Text(c, locales.UpdatesUnavailableHint()).FontSize(11).TextColor(p.muted)
 							}
-
-							ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-								ui.Text(c, a.updateStatusLine()).FontSize(11).TextColor(p.muted)
-								ui.Spacer(c)
-								checkBtn := ui.Row(c.Key("check-updates")).Height(30).Radius(15).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
-								if checkBtn.Hovered() {
-									checkBtn.Background(p.hover)
-								}
-								if checkBtn.Clicked() {
-									a.checkUpdates()
-								}
-								checkBtn.Children(func() {
-									ui.Text(c, locales.CheckForUpdates()).FontSize(12).TextColor(p.accent)
-								})
-							})
 						})
 					}
 

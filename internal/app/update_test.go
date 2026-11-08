@@ -105,9 +105,12 @@ func TestUpdatesUnsupportedHint(t *testing.T) {
 	if tt.HasText("自动检查更新") {
 		t.Fatal("a build that cannot update itself should not offer automatic checks")
 	}
-	// Checking anyway shows the window that says why, so the button stays.
-	if _, ok := tt.Find("检查更新"); !ok {
-		t.Fatal("settings should offer 检查更新 even when this build cannot update itself")
+	// No manual check either: the package manager is where it updates.
+	if _, ok := tt.Find("检查更新"); ok {
+		t.Fatal("a package manager install should offer no 检查更新 button")
+	}
+	if tt.HasText("尚未检查更新") {
+		t.Fatalf("a package manager install should say nothing about checks, texts: %v", tt.Texts())
 	}
 }
 
