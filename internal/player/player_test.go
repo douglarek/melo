@@ -3,7 +3,9 @@ package player
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -578,5 +580,88 @@ func TestSetQueueCopiesTracks(t *testing.T) {
 
 	if got := p.Queue()[0].Title; got != "Original" {
 		t.Fatalf("queue shares caller slice: title = %q", got)
+	}
+}
+
+// A track YouTube will not serve here — a region lock, a removal — is skipped
+// so the queue plays on, while a stream that merely failed to load stops at
+// its track for a retry.
+func TestUnavailableTrackIsSkipped(t *testing.T) {
+	p := newTestPlayer(t)
+	asked := make(chan string, 8)
+	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+		asked <- id
+		if id == "v1" {
+			return nil, fmt.Errorf("sabr player: %w", ytmusic.ErrUnavailable)
+		}
+		return nil, errors.New("network is down")
+	}
+	errored := make(chan string, 8)
+	p.Error = func(id string, err error) { errored <- id }
+
+	p.SetQueue([]ytmusic.Track{{ID: "v1", Title: "Gone"}, {ID: "v2", Title: "Here"}}, 0)
+
+	for want := range 2 {
+		select {
+		case id := <-errored:
+			if want == 0 && id != "v1" {
+				t.Fatalf("first failure = %q, want v1", id)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("track %d never reported its failure", want+1)
+		}
+	}
+	if cur := p.Current(); cur == nil || cur.ID != "v2" {
+		t.Fatalf("current = %+v, want v2: the unavailable track was not skipped", cur)
+	}
+	if got := p.Playing() || p.Loading(); got {
+		t.Fatalf("playing=%v loading=%v, want playback stopped on the failed v2", p.Playing(), p.Loading())
+	}
+
+	var ids []string
+	for len(asked) > 0 {
+		ids = append(ids, <-asked)
+	}
+	if want := []string{"v1", "v2"}; !slices.Equal(ids, want) {
+		t.Fatalf("resolved %v, want %v: the plain failure must not skip", ids, want)
+	}
+}
+
+// A queue where every track is unavailable stops after trying each one, even
+// with repeat all: it must not spin through them for ever.
+func TestQueueOfUnavailableTracksStops(t *testing.T) {
+	p := newTestPlayer(t)
+	var attempts atomic.Int32
+	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+		attempts.Add(1)
+		return nil, ytmusic.ErrUnavailable
+	}
+	failed := make(chan string, 8)
+	p.Error = func(id string, err error) { failed <- id }
+	p.SetRepeat(RepeatAll)
+
+	p.SetQueue([]ytmusic.Track{{ID: "v1"}, {ID: "v2"}, {ID: "v3"}}, 0)
+
+	for want := range 3 {
+		select {
+		case <-failed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 3 tracks were tried", want)
+		}
+	}
+	// A fourth attempt would mean the queue wrapped around again.
+	select {
+	case <-failed:
+		t.Fatal("the player went through the unavailable queue again")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("resolved %d times, want 3", got)
+	}
+	if cur := p.Current(); cur == nil || cur.ID != "v3" {
+		t.Fatalf("current = %+v, want the last track", cur)
+	}
+	if p.Active() {
+		t.Fatal("playback should be stopped once every track failed")
 	}
 }

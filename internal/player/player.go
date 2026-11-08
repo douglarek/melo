@@ -2,6 +2,7 @@ package player
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"slices"
 	"sync"
@@ -79,6 +80,10 @@ type Player struct {
 	resumeID    string
 	pendingPlay bool
 	playing     bool
+
+	// failStreak counts the tracks skipped in a row because YouTube would
+	// not serve them, so a queue of them stops instead of spinning.
+	failStreak int
 }
 
 // New returns a newly initialized Player.
@@ -350,6 +355,7 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 		p.loading = false
 		p.playing = false
 		p.pendingPlay = false
+		p.failStreak = 0
 		p.feed = nil
 		p.radio = ""
 		p.radioGen++
@@ -364,6 +370,7 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 	}
 	p.queue = append([]ytmusic.Track(nil), tracks...)
 	p.reorderLocked(start)
+	p.failStreak = 0
 	p.feed = nil
 	p.radio = ""
 	p.radioGen++
@@ -481,21 +488,7 @@ func (p *Player) playCurrent() {
 		info, err := resolver(ctx, track.ID)
 		if err != nil {
 			p.post(func() {
-				p.mu.Lock()
-				if gen != p.gen {
-					p.mu.Unlock()
-					return
-				}
-				p.loading = false
-				p.playing = false
-				p.pendingPlay = false
-				p.resumeAt = p.pauseOffset
-				p.resumeID = track.ID
-				p.mu.Unlock()
-				if p.Error != nil {
-					p.Error(track.ID, err)
-				}
-				p.changed()
+				p.failLoad(gen, track, err)
 			})
 			return
 		}
@@ -555,21 +548,7 @@ func (p *Player) playCurrent() {
 
 		if err != nil {
 			p.post(func() {
-				p.mu.Lock()
-				if gen != p.gen {
-					p.mu.Unlock()
-					return
-				}
-				p.loading = false
-				p.playing = false
-				p.pendingPlay = false
-				p.resumeAt = p.pauseOffset
-				p.resumeID = track.ID
-				p.mu.Unlock()
-				if p.Error != nil {
-					p.Error(track.ID, err)
-				}
-				p.changed()
+				p.failLoad(gen, track, err)
 			})
 			return
 		}
@@ -604,6 +583,7 @@ func (p *Player) playCurrent() {
 			p.out = out
 			p.info = info
 			p.loading = false
+			p.failStreak = 0
 			playNow := p.pendingPlay
 			p.pendingPlay = false
 			p.playing = playNow
@@ -620,6 +600,48 @@ func (p *Player) playCurrent() {
 		})
 	})
 	p.mu.Unlock()
+	p.changed()
+}
+
+// failLoad reports a track whose stream did not resolve. A track YouTube will
+// not serve here — a region lock, a removal — is skipped so the queue plays
+// on, rather than stopping the album on the one song. A streak of them stops:
+// once every track of the queue has failed in turn there is nothing to skip
+// to, and a repeat mode must not send the player through them again.
+func (p *Player) failLoad(gen int, track ytmusic.Track, err error) {
+	p.mu.Lock()
+	if gen != p.gen {
+		p.mu.Unlock()
+		return
+	}
+	skip := false
+	if errors.Is(err, ytmusic.ErrUnavailable) && p.pendingPlay {
+		p.failStreak++
+		if p.failStreak < len(p.order) && (p.at+1 < len(p.order) || p.repeat == RepeatAll) {
+			skip = true
+			p.at++
+			if p.at >= len(p.order) {
+				p.at = 0
+			}
+			p.resumeAt, p.resumeID = 0, ""
+		}
+	}
+	if !skip {
+		p.loading = false
+		p.playing = false
+		p.pendingPlay = false
+		p.resumeAt = p.pauseOffset
+		p.resumeID = track.ID
+	}
+	p.mu.Unlock()
+
+	if p.Error != nil {
+		p.Error(track.ID, err)
+	}
+	if skip {
+		p.playCurrent()
+		return
+	}
 	p.changed()
 }
 
