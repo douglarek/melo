@@ -187,7 +187,7 @@
   "updateBadgePrefix": "有更新 ",
   "updateBadgeTooltip": "有可用更新，点击查看",
   "updateToPrefix": "更新到 ",
-  "updatesUnavailableHint": "当前为开发版本，或由软件包管理器（如 .deb / RPM）安装，无法在应用内自行更新。",
+  "updatesUnavailableHint": "由软件包管理器（如 .deb / RPM）安装，请在包管理器里更新。",
   "versionPrefix": "版本 ",
   "videos": "视频",
   "volume": "音量",

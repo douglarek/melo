@@ -1904,11 +1904,11 @@ func (msgs Messages) UpdateToPrefix() string {
 	return Catalog.Format(msgs.locale, "updateToPrefix", nil)
 }
 
-// UpdatesUnavailableHint says "当前为开发版本，或由软件包管理器（如 .deb / RPM）安装，无法在应用内自行更新。"
+// UpdatesUnavailableHint says "由软件包管理器（如 .deb / RPM）安装，请在包管理器里更新。"
 // in the language the app shows.
 func UpdatesUnavailableHint() string { return In(i18n.Locale()).UpdatesUnavailableHint() }
 
-// UpdatesUnavailableHint says "当前为开发版本，或由软件包管理器（如 .deb / RPM）安装，无法在应用内自行更新。"
+// UpdatesUnavailableHint says "由软件包管理器（如 .deb / RPM）安装，请在包管理器里更新。"
 // in the language of msgs.
 func (msgs Messages) UpdatesUnavailableHint() string {
 	return Catalog.Format(msgs.locale, "updatesUnavailableHint", nil)

@@ -290,41 +290,44 @@ func (a *app) settingsModalView(c *ui.Context) {
 						ui.Text(c, locales.NotificationsHint()).FontSize(11).TextColor(p.muted)
 					})
 
-					// 7. Software updates
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, locales.SoftwareUpdate()).FontSize(14).Bold().TextColor(p.text)
-							ui.Spacer(c)
-							ui.Text(c, a.versionLabel()).FontSize(11).TextColor(p.muted)
-						})
+					// 7. Software updates: none for a development build,
+					// which cannot install one, and whose reader builds it.
+					if !a.update.dev {
+						ui.Column(c).FillWidth().Gap(8).Children(func() {
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+								ui.Text(c, locales.SoftwareUpdate()).FontSize(14).Bold().TextColor(p.text)
+								ui.Spacer(c)
+								ui.Text(c, a.versionLabel()).FontSize(11).TextColor(p.muted)
+							})
 
-						if a.update.supported {
-							cb := ui.Checkbox(c, &a.settings.CheckUpdates, locales.AutoChecksToggle())
-							if cb.Changed() {
-								a.setUpdateChecks(a.settings.CheckUpdates)
+							if a.update.supported {
+								cb := ui.Checkbox(c, &a.settings.CheckUpdates, locales.AutoChecksToggle())
+								if cb.Changed() {
+									a.setUpdateChecks(a.settings.CheckUpdates)
+								}
+								ui.Text(c, locales.AutoChecksHint()).FontSize(11).TextColor(p.muted)
+							} else {
+								// 由 deb / rpm 等软件包管理器安装的版本，
+								// 不能替换自身。
+								ui.Text(c, locales.UpdatesUnavailableHint()).FontSize(11).TextColor(p.muted)
 							}
-							ui.Text(c, locales.AutoChecksHint()).FontSize(11).TextColor(p.muted)
-						} else {
-							// 开发版，以及 deb / rpm 等由软件包管理器安装的版本，
-							// 不能替换自身。
-							ui.Text(c, locales.UpdatesUnavailableHint()).FontSize(11).TextColor(p.muted)
-						}
 
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-							ui.Text(c, a.updateStatusLine()).FontSize(11).TextColor(p.muted)
-							ui.Spacer(c)
-							checkBtn := ui.Row(c.Key("check-updates")).Height(30).Radius(15).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
-							if checkBtn.Hovered() {
-								checkBtn.Background(p.hover)
-							}
-							if checkBtn.Clicked() {
-								a.checkUpdates()
-							}
-							checkBtn.Children(func() {
-								ui.Text(c, locales.CheckForUpdates()).FontSize(12).TextColor(p.accent)
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+								ui.Text(c, a.updateStatusLine()).FontSize(11).TextColor(p.muted)
+								ui.Spacer(c)
+								checkBtn := ui.Row(c.Key("check-updates")).Height(30).Radius(15).Background(p.card).Padding(0, 14).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+								if checkBtn.Hovered() {
+									checkBtn.Background(p.hover)
+								}
+								if checkBtn.Clicked() {
+									a.checkUpdates()
+								}
+								checkBtn.Children(func() {
+									ui.Text(c, locales.CheckForUpdates()).FontSize(12).TextColor(p.accent)
+								})
 							})
 						})
-					})
+					}
 
 					// 8. About
 					ui.Column(c).FillWidth().Background(p.card).Radius(10).Padding(12).Gap(4).Children(func() {

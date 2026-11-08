@@ -51,6 +51,9 @@ type updateStatus struct {
 	// build where it may write, not a development build, and not an app a
 	// package manager installed.
 	supported bool
+	// dev reports a development build, whose settings say nothing about
+	// updates: it cannot install one anyway, and whoever runs it builds it.
+	dev bool
 	// version is the version that runs.
 	version string
 }
@@ -61,6 +64,7 @@ var (
 	updatesCheck    = mygo.Updater.Check
 	updatesWindow   = updater.CheckForUpdates
 	updatesOnChange = updater.OnChange
+	isDev           = mygo.IsDev
 	updatesFound    = func() (available string, lastCheck time.Time) {
 		return updater.AvailableVersion(), updater.LastCheck()
 	}
@@ -168,7 +172,7 @@ func (a *app) adoptWindowState() {
 // page, and drops a version that the previous launch found and that this one
 // runs: it is not news.
 func (a *app) refreshUpdates() {
-	a.update = updateStatus{supported: updatesEnabled(), version: appVersion()}
+	a.update = updateStatus{supported: updatesEnabled(), dev: isDev(), version: appVersion()}
 	if v := a.settings.UpdateAvailable; v != "" && v == a.update.version {
 		a.settings.UpdateAvailable = ""
 		a.settings.save()

@@ -336,3 +336,23 @@ func TestUpdateLoopStaysQuietWhenOff(t *testing.T) {
 		t.Fatalf("the loop checked %d times with checks off", n)
 	}
 }
+
+// A development build says nothing about updates: it cannot install one,
+// and whoever runs it builds it.
+func TestDevelopmentBuildHidesUpdates(t *testing.T) {
+	stubUpdates(t)
+
+	a := newTestApp(t)
+	a.update = updateStatus{supported: false, dev: true, version: "0.3.0"}
+	a.settingsModalOpen = true
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+
+	if tt.HasText("软件更新") || tt.HasText("检查更新") {
+		t.Fatalf("a development build should hide the update section, texts: %v", tt.Texts())
+	}
+	// The version is still there, under About.
+	if !tt.HasText("版本 0.3.0") {
+		t.Fatalf("the About section should still name the version, texts: %v", tt.Texts())
+	}
+}

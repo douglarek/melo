@@ -187,7 +187,7 @@
   "updateBadgePrefix": "Update ",
   "updateBadgeTooltip": "An update is available: click to see it",
   "updateToPrefix": "Update to ",
-  "updatesUnavailableHint": "This is a development build, or an install by a package manager (such as .deb or RPM), which cannot update itself.",
+  "updatesUnavailableHint": "Installed by a package manager, such as the .deb or the RPM: update it there.",
   "versionPrefix": "Version ",
   "videos": "Videos",
   "volume": "Volume",
