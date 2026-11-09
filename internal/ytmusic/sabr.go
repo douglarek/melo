@@ -307,7 +307,12 @@ func (c *Client) visionOSPlayer(ctx context.Context, videoID, visitor string) (m
 	req.Header.Set("X-Goog-Visitor-Id", visitor)
 	req.Header.Set("X-Origin", "https://music.youtube.com")
 	req.Header.Set("Referer", "https://music.youtube.com/")
-	c.setPlayerAuthOrigin(req, "https://music.youtube.com")
+	c.mu.RLock()
+	cookie := c.cookie
+	c.mu.RUnlock()
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
