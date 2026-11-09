@@ -29,6 +29,30 @@ func TestFindASC(t *testing.T) {
 	}
 }
 
+func TestParseMoofRejectsHugeSampleCount(t *testing.T) {
+	tfhd := fullBox("tfhd", 0, []byte{0, 0, 0, 1})
+	trunBody := make([]byte, 8)
+	binary.BigEndian.PutUint32(trunBody[0:], 0xffffffff)
+	trun := fullBox("trun", 0, trunBody)
+	moof := box("moof", box("traf", append(tfhd, trun...)))
+
+	if _, err := parseMoof(moof, 0, 0, 44100); err == nil {
+		t.Fatal("accepted a track run with a huge sample count")
+	}
+}
+
+func TestParseMoofRejectsTruncatedTrun(t *testing.T) {
+	tfhd := fullBox("tfhd", 0, []byte{0, 0, 0, 1})
+	trunBody := make([]byte, 8)
+	binary.BigEndian.PutUint32(trunBody[0:], 10) // ten samples
+	trun := fullBox("trun", 0x300, trunBody)     // duration and size per sample, none present
+	moof := box("moof", box("traf", append(tfhd, trun...)))
+
+	if _, err := parseMoof(moof, 0, 0, 44100); err == nil {
+		t.Fatal("accepted a track run shorter than its samples")
+	}
+}
+
 func TestParseMoof(t *testing.T) {
 	tfhd := fullBox("tfhd", 0x18, []byte{0, 0, 0, 1, 0, 0, 4, 0, 0, 0x04, 0})
 	// tfhd body: track_ID=1, default_duration=1024, default_size=4

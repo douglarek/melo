@@ -9,6 +9,9 @@ import (
 
 var errFMP4 = errors.New("fmp4: malformed box")
 
+// maxFMP4Samples bounds a track run, whose declared count is untrusted.
+const maxFMP4Samples = 65536
+
 // fmp4Init is what the init segment (ftyp + moov) says about the audio.
 type fmp4Init struct {
 	asc        []byte
@@ -256,6 +259,9 @@ func parseMoof(data []byte, moofOff, mdatPayload int64, timescale uint32) ([]fmp
 				}
 				flags := binary.BigEndian.Uint32(body[0:]) & 0xffffff
 				count = binary.BigEndian.Uint32(body[4:])
+				if count > maxFMP4Samples {
+					return errFMP4
+				}
 				pos := 8
 				if flags&0x1 != 0 {
 					if len(body) < pos+4 {
@@ -268,6 +274,24 @@ func parseMoof(data []byte, moofOff, mdatPayload int64, timescale uint32) ([]fmp
 				if flags&0x4 != 0 {
 					pos += 4
 				}
+				entrySize := 0
+				if flags&0x100 != 0 {
+					entrySize += 4
+				}
+				if flags&0x200 != 0 {
+					entrySize += 4
+				}
+				if flags&0x400 != 0 {
+					entrySize += 4
+				}
+				if flags&0x800 != 0 {
+					entrySize += 4
+				}
+				if entrySize > 0 && int64(len(body)) < int64(pos)+int64(count)*int64(entrySize) {
+					return errFMP4
+				}
+				sizes = make([]uint32, 0, min(int(count), 1024))
+				durs = make([]uint32, 0, min(int(count), 1024))
 				for i := uint32(0); i < count; i++ {
 					var sz, du uint32
 					if flags&0x100 != 0 {
