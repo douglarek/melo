@@ -3,6 +3,18 @@
 Melo 的版本说明。更新窗口显示的说明就是当前版本这一节的内容：`mygo build` 把它写进
 更新清单，见 [updates](https://github.com/egoist/mygo/blob/main/docs/updates.md)。
 
+## [0.4.2] - 2026-11-09
+
+### 修复
+
+- **从 0.3.2 升级后无法播放**：0.3.2 会把最新的 cookie 写进 `session.json`，而
+  0.4.x 优先使用迁移到系统凭据库里的旧 cookie，升级后一直拿过期会话请求，SABR 被拒后
+  回退到 96k，HE-AAC 曲目直接解不出来。现在优先使用 `session.json` 里的 cookie 并迁移
+  进凭据库，文件里没有时才读凭据库。
+- **128k 播放恢复**：visionOS player 请求带上 `SAPISIDHASH` 后会被服务端拒绝（400 或要求
+  登录），所有曲目只能回退 Android 18。恢复成只发 `Cookie`，与 0.3.2 一致，SABR 140
+  正常返回。
+
 ## [0.4.1] - 2026-11-09
 
 ### 新增
