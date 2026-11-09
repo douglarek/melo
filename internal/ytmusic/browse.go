@@ -1186,6 +1186,29 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 	return art, nil
 }
 
+// cardFromItem parses one item of a carousel, of either kind: a card, or the
+// row a channel and a podcast's related page lists episodes as.
+func cardFromItem(item map[string]any) (CardItem, bool) {
+	if twoRow, ok := item["musicTwoRowItemRenderer"].(map[string]any); ok {
+		return parseTwoRowItem(twoRow), true
+	}
+	if row, ok := item["musicMultiRowListItemRenderer"].(map[string]any); ok {
+		track := parseMultiRowTrack(row)
+		if track.ID == "" {
+			return CardItem{}, false
+		}
+		return CardItem{
+			ID:        track.ID,
+			Title:     track.Title,
+			Subtitle:  RunsToString(row["secondTitle"]),
+			Thumbnail: track.Thumbnail,
+			Type:      "track",
+			Track:     &track,
+		}, true
+	}
+	return CardItem{}, false
+}
+
 // collectionShelf parses a carousel whose items are of either kind: a channel
 // lists its shows as two-row cards and its latest episodes as rows.
 func collectionShelf(title string, items []any) *ArtistCollection {
@@ -1195,23 +1218,8 @@ func collectionShelf(title string, items []any) *ArtistCollection {
 		if !ok {
 			continue
 		}
-		if twoRow, ok := im["musicTwoRowItemRenderer"].(map[string]any); ok {
-			col.Items = append(col.Items, parseTwoRowItem(twoRow))
-			continue
-		}
-		if row, ok := im["musicMultiRowListItemRenderer"].(map[string]any); ok {
-			track := parseMultiRowTrack(row)
-			if track.ID == "" {
-				continue
-			}
-			col.Items = append(col.Items, CardItem{
-				ID:        track.ID,
-				Title:     track.Title,
-				Subtitle:  RunsToString(row["secondTitle"]),
-				Thumbnail: track.Thumbnail,
-				Type:      "track",
-				Track:     &track,
-			})
+		if card, ok := cardFromItem(im); ok {
+			col.Items = append(col.Items, card)
 		}
 	}
 	if len(col.Items) == 0 {

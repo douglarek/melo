@@ -63,9 +63,28 @@ func activeLyricLine(lines []ytmusic.LyricLine, synced bool, pos time.Duration) 
 	return active
 }
 
-// npPanes returns the tabs Now Playing shows.
+// npPanes returns the tabs Now Playing shows. A podcast episode has no
+// lyrics to show, and its page offers none to fetch.
 func (a *app) npPanes() []paneKind {
+	if cur := a.pl.Current(); cur != nil && cur.Podcast {
+		return []paneKind{paneQueue, paneRelated}
+	}
 	return []paneKind{paneLyrics, paneQueue, paneRelated}
+}
+
+// showingPane is the pane the view fills: the chosen one, unless this track
+// offers no such tab.
+func (a *app) showingPane() paneKind {
+	panes := a.npPanes()
+	for _, pane := range panes {
+		if pane == a.npPane {
+			return pane
+		}
+	}
+	if len(panes) > 0 {
+		return panes[0]
+	}
+	return a.npPane
 }
 
 func npPaneLabel(pane paneKind) string {
@@ -303,7 +322,7 @@ func (a *app) npTabs(c *ui.Context) {
 // npLyricsBadges say what the lyrics are, and resume following them after
 // the listener scrolled them, beside the tabs.
 func (a *app) npLyricsBadges(c *ui.Context) {
-	if a.npPane != paneLyrics || a.lyrics == nil {
+	if a.showingPane() != paneLyrics || a.lyrics == nil {
 		return
 	}
 	if !a.lyrics.Synced {
@@ -334,7 +353,7 @@ func (a *app) npLyricsBadges(c *ui.Context) {
 
 func (a *app) npTabButton(c *ui.Context, pane paneKind) {
 	label := npPaneLabel(pane)
-	active := a.npPane == pane
+	active := a.showingPane() == pane
 	btn := ui.ButtonBase(c.Key("np-tab-"+npPaneKey(pane))).Padding(6, 14).Radius(999).
 		FocusRing(false).Label(label).Cursor(ui.CursorPointer).Gap(6)
 	bg := ui.Transparent
@@ -740,7 +759,7 @@ func (a *app) npVolume(c *ui.Context) {
 
 // npPaneContent fills the pane beside the cover, as the chosen tab says.
 func (a *app) npPaneContent(c *ui.Context, cur *ytmusic.Track, paneW, paneH float32) {
-	switch a.npPane {
+	switch a.showingPane() {
 	case paneQueue:
 		a.npQueuePane(c)
 	case paneRelated:

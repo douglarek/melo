@@ -740,7 +740,9 @@ func (a *app) syncNowPlayingLyrics() {
 	}
 	a.lyricsLastVideoID = cur.ID
 	a.lyrics = nil
-	a.lyricsLoading = true
+	// A podcast episode has no lyrics, and no page to ask for them: skip the
+	// search rather than spend a request per episode on finding none.
+	a.lyricsLoading = !cur.Podcast
 	a.npLyricScroll = ui.ScrollState{}
 	a.npQueueScroll = ui.ScrollState{}
 	a.npLyricsManual = false
@@ -752,8 +754,11 @@ func (a *app) syncNowPlayingLyrics() {
 	a.relatedSections = nil
 	a.relatedLoading = false
 	a.relatedLoaded = false
-	if a.npPane == paneRelated && a.nowPlayingOpen {
+	if a.showingPane() == paneRelated && a.nowPlayingOpen {
 		a.loadRelated()
+	}
+	if cur.Podcast {
+		return
 	}
 
 	go func(t ytmusic.Track) {

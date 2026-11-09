@@ -1581,6 +1581,63 @@ func TestNowPlayingRelatedTab(t *testing.T) {
 	}
 }
 
+// A podcast episode has no lyrics tab, and no lyrics button in the player
+// bar: YouTube has none for it, and the pane would show nothing.
+func TestPodcastNowPlayingHasNoLyricsTab(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{{ID: "ep1", Title: "第 1 期", Podcast: true, Artists: []ytmusic.ArtistRef{{Name: "相声汇"}}, DurationMs: 2100000}}, 0)
+	a.nowPlayingOpen = true
+
+	tt := ui.NewTester(a.view, 1600, 1000)
+	tt.Frame()
+	if tt.HasText("歌词") {
+		t.Fatalf("a podcast offers a lyrics tab, texts: %v", tt.Texts())
+	}
+	for _, want := range []string{"待播清单", "相关推荐"} {
+		if !tt.HasText(want) {
+			t.Fatalf("podcast tabs are missing %q", want)
+		}
+	}
+
+	closed := newTestApp(t)
+	closed.pl.SetQueue([]ytmusic.Track{{ID: "ep1", Title: "第 1 期", Podcast: true}}, 0)
+	ct := ui.NewTester(closed.view, 1200, 800)
+	ct.Frame()
+	if _, ok := ct.Find("打开歌词"); ok {
+		t.Fatal("a podcast keeps the lyrics button in the player bar")
+	}
+}
+
+// A podcast's related page lists episodes and shows; its pane shows both.
+func TestPodcastRelatedPaneListsEpisodes(t *testing.T) {
+	a := newTestApp(t)
+	current := ytmusic.Track{ID: "ep0", Title: "第 0 期", Podcast: true, DurationMs: 2000000}
+	a.pl.SetQueue([]ytmusic.Track{current}, 0)
+	ep := ytmusic.Track{ID: "ep9", Title: "另一段相声", Podcast: true}
+	a.relatedSections = []ytmusic.Section{
+		{Title: "你可能还喜欢", Items: []ytmusic.CardItem{{ID: ep.ID, Title: ep.Title, Type: "track", Track: &ep}}},
+		{Title: "推荐的播客", Items: []ytmusic.CardItem{{ID: "MPSPPLother", Title: "别家相声", Type: "podcast"}}},
+	}
+	a.relatedVideoID = current.ID
+	a.relatedLoaded = true
+	a.nowPlayingOpen = true
+	a.npPane = paneRelated
+
+	tt := ui.NewTester(a.view, 1600, 1000)
+	tt.Frame()
+	for _, want := range []string{"你可能还喜欢", "另一段相声", "推荐的播客", "别家相声"} {
+		if !tt.HasText(want) {
+			t.Fatalf("related pane is missing %q, texts: %v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("别家相声"); err != nil {
+		t.Fatalf("click the show: %v", err)
+	}
+	if a.route.page != pagePlaylist || a.route.id != "MPSPPLother" {
+		t.Fatalf("the show card opened %+v, want its page", a.route)
+	}
+}
+
 func TestNowPlayingCloseAnimates(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{{ID: "track1", Title: "晴天", DurationMs: 269000}}, 0)

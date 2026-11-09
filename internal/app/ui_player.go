@@ -225,26 +225,28 @@ func (a *app) playerBar(c *ui.Context) {
 				ui.Icon(c, iconQueue).Size(16, 16).TextColor(col)
 			})
 
-			// Lyrics / Now Playing Button
-			npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Label(locales.OpenTheLyrics()).Size(28, 28).Radius(14).
-				AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
-			if a.nowPlayingOpen && a.npPane == paneLyrics {
-				npBtn.Background(p.hover)
-			}
-			if npBtn.Hovered() {
-				npBtn.Background(p.hover)
-			}
-			if npBtn.Clicked() {
-				a.choosePane(paneLyrics)
-				a.nowPlayingOpen = true
-			}
-			npBtn.Children(func() {
-				col := p.muted
-				if a.nowPlayingOpen && a.npPane == paneLyrics {
-					col = p.accent
+			// Lyrics / Now Playing Button, which a podcast has no lyrics for.
+			if cur == nil || !cur.Podcast {
+				npBtn := ui.Box(c.Key("ctl-lyrics-btn")).Label(locales.OpenTheLyrics()).Size(28, 28).Radius(14).
+					AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Shrink(0)
+				if a.nowPlayingOpen && a.showingPane() == paneLyrics {
+					npBtn.Background(p.hover)
 				}
-				ui.Icon(c, iconLyrics).Size(16, 16).TextColor(col)
-			})
+				if npBtn.Hovered() {
+					npBtn.Background(p.hover)
+				}
+				if npBtn.Clicked() {
+					a.choosePane(paneLyrics)
+					a.nowPlayingOpen = true
+				}
+				npBtn.Children(func() {
+					col := p.muted
+					if a.nowPlayingOpen && a.showingPane() == paneLyrics {
+						col = p.accent
+					}
+					ui.Icon(c, iconLyrics).Size(16, 16).TextColor(col)
+				})
+			}
 		})
 	})
 }

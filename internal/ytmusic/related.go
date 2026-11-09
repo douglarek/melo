@@ -88,11 +88,9 @@ func parseRelatedSections(root map[string]any) []Section {
 				})
 				continue
 			}
-			if r, ok := im["musicTwoRowItemRenderer"].(map[string]any); ok {
-				card := parseTwoRowItem(r)
-				if card.ID != "" || card.Title != "" {
-					items = append(items, card)
-				}
+			// A podcast's related page lists its episodes as rows, not cards.
+			if card, ok := cardFromItem(im); ok {
+				items = append(items, card)
 			}
 		}
 		if len(items) > 0 {

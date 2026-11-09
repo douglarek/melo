@@ -219,7 +219,7 @@ func (a *app) npRelatedPane(c *ui.Context, paneW float32) {
 			if trackShelf == nil {
 				trackShelf = sec
 			}
-		case "playlist", "album":
+		case "playlist", "album", "podcast", "artist":
 			if cardShelf == nil {
 				cardShelf = sec
 			}
@@ -297,6 +297,8 @@ func (a *app) npRelatedCard(c *ui.Context, key string, item ytmusic.CardItem, wi
 			a.open(route{page: pageAlbum, id: item.ID})
 		case "artist":
 			a.open(route{page: pageArtist, id: item.ID})
+		case "podcast":
+			a.open(route{page: pagePlaylist, id: item.ID})
 		}
 	}
 	card.Children(func() {
