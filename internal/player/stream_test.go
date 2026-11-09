@@ -21,6 +21,44 @@ import (
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
+func TestSegmentReaderWaitsForInFlightFetch(t *testing.T) {
+	s := &hlsStream{
+		ctx:         context.Background(),
+		segments:    []ytmusic.StreamSegment{{URI: "http://example.invalid"}},
+		segData:     make([][]byte, 1),
+		segErr:      make([]error, 1),
+		segDone:     []chan struct{}{make(chan struct{})},
+		downloading: map[int]bool{0: true},
+	}
+	sr := &segmentReader{s: s, segIdx: 0}
+	got := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 8)
+		n, err := sr.Read(buf)
+		if err != nil {
+			got <- "error: " + err.Error()
+			return
+		}
+		got <- string(buf[:n])
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	s.mu.Lock()
+	s.segData[0] = []byte("abc")
+	s.downloading[0] = false
+	s.finishSegmentLocked(0)
+	s.mu.Unlock()
+
+	select {
+	case text := <-got:
+		if text != "abc" {
+			t.Fatalf("read = %q, want abc", text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reader did not wake when the segment finished")
+	}
+}
+
 func TestHLSSkipFrames(t *testing.T) {
 	if got := hlsSkipFrames(5000, 2000, 44100); got != 132300 {
 		t.Fatalf("skip = %d, want 132300", got)

@@ -44,6 +44,7 @@ type hlsStream struct {
 	segments    []ytmusic.StreamSegment
 	segData     [][]byte
 	segErr      []error
+	segDone     []chan struct{}
 	downloading map[int]bool
 	cancel      context.CancelFunc
 	ctx         context.Context
@@ -79,10 +80,14 @@ func openHLSStream(ctx context.Context, info *ytmusic.StreamInfo, cache *Cache) 
 		segments:    info.Segments,
 		segData:     make([][]byte, len(info.Segments)),
 		segErr:      make([]error, len(info.Segments)),
+		segDone:     make([]chan struct{}, len(info.Segments)),
 		downloading: make(map[int]bool),
 		cancel:      cancel,
 		ctx:         streamCtx,
 		spectrum:    make([]float32, 16),
+	}
+	for i := range s.segDone {
+		s.segDone[i] = make(chan struct{})
 	}
 
 	// Cached audio is decoded from memory; seeking rebuilds the decoder and
@@ -198,6 +203,7 @@ func (s *hlsStream) fetchSegment(idx int) error {
 	s.segData[idx] = cleanData
 	s.segErr[idx] = nil
 	s.downloading[idx] = false
+	s.finishSegmentLocked(idx)
 	s.mu.Unlock()
 
 	return nil
@@ -209,7 +215,18 @@ func (s *hlsStream) failSegment(idx int, err error) {
 	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		s.segErr[idx] = err
 	}
+	s.finishSegmentLocked(idx)
 	s.mu.Unlock()
+}
+
+// finishSegmentLocked wakes the readers waiting for a segment. The caller
+// holds s.mu.
+func (s *hlsStream) finishSegmentLocked(idx int) {
+	if idx < 0 || idx >= len(s.segDone) || s.segDone[idx] == nil {
+		return
+	}
+	close(s.segDone[idx])
+	s.segDone[idx] = nil
 }
 
 func stripID3(data []byte) []byte {
@@ -458,6 +475,7 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 		}
 		data := sr.s.segData[sr.segIdx]
 		segErr := sr.s.segErr[sr.segIdx]
+		done := sr.s.segDone[sr.segIdx]
 		sr.s.mu.Unlock()
 
 		if segErr != nil {
@@ -477,10 +495,13 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 				return 0, segErr
 			}
 			if data == nil {
+				if done == nil {
+					return 0, errors.New("hls: segment unavailable")
+				}
 				select {
 				case <-sr.s.ctx.Done():
 					return 0, sr.s.ctx.Err()
-				case <-time.After(5 * time.Millisecond):
+				case <-done:
 					continue
 				}
 			}
