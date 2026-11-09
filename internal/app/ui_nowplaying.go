@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -550,10 +549,11 @@ func (a *app) npArtists(c *ui.Context, t ytmusic.Track) {
 				ui.Text(c, ", ").FontSize(14).TextColor(npWhite.Alpha(0.42))
 			}
 			artist := ar
-			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
-			if artist.ID != "" && strings.HasPrefix(artist.ID, "UC") {
-				r = route{page: pageArtist, id: artist.ID}
+			fallback := ytmusic.SearchArtists
+			if t.Podcast {
+				fallback = ytmusic.SearchPodcasts
 			}
+			r := artistRoute(artist, fallback)
 			link := ui.Row(c.Key(fmt.Sprintf("np-artist-%s-%d", t.ID, i))).
 				Label(locales.NowPlayingPrefix() + artist.Name).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 			var label ui.Element

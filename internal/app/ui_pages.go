@@ -1323,17 +1323,23 @@ func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRe
 			if n > 0 {
 				ui.Text(c, ", ").FontSize(size).TextColor(color)
 			}
-			r := route{page: pageSearch, query: artist.Name, kind: fallback}
-			switch {
-			case strings.HasPrefix(artist.ID, "UC"):
-				r = route{page: pageArtist, id: artist.ID}
-			case ytmusic.IsPodcastShowID(artist.ID):
-				r = route{page: pagePlaylist, id: artist.ID}
-			}
-			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", key, n)), artist.Name, size, color, hover, r)
+			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", key, n)), artist.Name, size, color, hover, artistRoute(artist, fallback))
 			n++
 		}
 	})
+}
+
+// artistRoute is where a name leads: the artist's page, the show's page for a
+// podcast, or a search of the artists or the podcasts when it names no page.
+func artistRoute(artist ytmusic.ArtistRef, fallback ytmusic.SearchType) route {
+	r := route{page: pageSearch, query: artist.Name, kind: fallback}
+	switch {
+	case strings.HasPrefix(artist.ID, "UC"):
+		r = route{page: pageArtist, id: artist.ID}
+	case ytmusic.IsPodcastShowID(artist.ID):
+		r = route{page: pagePlaylist, id: artist.ID}
+	}
+	return r
 }
 
 func (a *app) link(c *ui.Context, text string, size float32, color, hover ui.Color, r route) {

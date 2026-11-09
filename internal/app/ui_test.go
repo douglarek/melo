@@ -1648,6 +1648,42 @@ func TestClickingAnEpisodeKeepsTheShowComing(t *testing.T) {
 	}
 }
 
+// The byline inside Now Playing routes a podcast's show the way the player
+// bar does: the show's page when the name carries it, a search of podcasts
+// when it carries none — never a search of musicians.
+func TestNowPlayingArtistLinkRoutesAPodcast(t *testing.T) {
+	a := newTestApp(t)
+	cur := ytmusic.Track{ID: "ep1", Title: "第 1 期", Podcast: true,
+		Artists: []ytmusic.ArtistRef{{ID: "MPSPPLshow", Name: "相声汇"}}}
+	a.pl.SetQueue([]ytmusic.Track{cur}, 0)
+	a.nowPlayingOpen = true
+
+	tt := ui.NewTester(a.view, 1600, 1000)
+	tt.Frame()
+	// The player bar behind the overlay shows the name too: target the
+	// now-playing panel's own link.
+	if err := tt.Click("正在播放 · 相声汇"); err != nil {
+		t.Fatalf("click the show: %v", err)
+	}
+	if a.route.page != pagePlaylist || a.route.id != "MPSPPLshow" {
+		t.Fatalf("the show opened %+v, want its page", a.route)
+	}
+
+	// No page named: the name is searched among podcasts.
+	b := newTestApp(t)
+	b.pl.SetQueue([]ytmusic.Track{{ID: "ep2", Title: "第 2 期", Podcast: true,
+		Artists: []ytmusic.ArtistRef{{Name: "相声汇"}}}}, 0)
+	b.nowPlayingOpen = true
+	bt := ui.NewTester(b.view, 1600, 1000)
+	bt.Frame()
+	if err := bt.Click("正在播放 · 相声汇"); err != nil {
+		t.Fatalf("click the show's name: %v", err)
+	}
+	if b.route.page != pageSearch || b.route.kind != ytmusic.SearchPodcasts || b.route.query != "相声汇" {
+		t.Fatalf("the name opened %+v, want a search of podcasts", b.route)
+	}
+}
+
 func TestPodcastQueueTabShowsTheQueue(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{
