@@ -187,7 +187,7 @@ func TestPodcastShowArtistsKeepsTheShowsID(t *testing.T) {
 }
 
 // An episode a search finds names its show the same way, and the show's page
-// is what its name opens.
+// is what its name opens; the date beside it is not an artist.
 func TestExtractArtistsKeepsTheShowOfAnEpisode(t *testing.T) {
 	runs := []any{
 		map[string]any{"text": "2023年11月20日"},
@@ -196,7 +196,20 @@ func TestExtractArtistsKeepsTheShowOfAnEpisode(t *testing.T) {
 		}},
 	}
 	artists := extractArtistsFromRuns(runs)
-	if len(artists) != 2 || artists[1].ID != "MPSPPLshow" || artists[1].Name != "相声汇" {
-		t.Fatalf("artists = %+v, want the show with its page", artists)
+	if len(artists) != 1 || artists[0].ID != "MPSPPLshow" || artists[0].Name != "相声汇" {
+		t.Fatalf("artists = %+v, want only the show", artists)
+	}
+}
+
+// A row whose artist YouTube links nowhere keeps its name all the same.
+func TestExtractArtistsFallsBackToAPlainName(t *testing.T) {
+	runs := []any{
+		map[string]any{"text": "某歌手"},
+		map[string]any{"text": " • "},
+		map[string]any{"text": "4:32"},
+	}
+	artists := extractArtistsFromRuns(runs)
+	if len(artists) != 1 || artists[0].Name != "某歌手" || artists[0].ID != "" {
+		t.Fatalf("artists = %+v, want the plain name", artists)
 	}
 }

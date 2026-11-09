@@ -401,7 +401,8 @@ func extractDuration(r map[string]any, flexCols []any) int64 {
 }
 
 func extractArtistsFromRuns(runs []any) []ArtistRef {
-	var artists []ArtistRef
+	var linked []ArtistRef
+	fallback := ""
 	for _, r := range runs {
 		m, ok := r.(map[string]any)
 		if !ok {
@@ -418,14 +419,21 @@ func extractArtistsFromRuns(runs []any) []ArtistRef {
 		// An episode names the show it belongs to, whose page is not an
 		// artist's but one to open all the same.
 		if strings.HasPrefix(browseID, "UC") || IsPodcastShowID(browseID) {
-			artists = append(artists, ArtistRef{
-				ID:   browseID,
-				Name: text,
-			})
-		} else if len(artists) == 0 && text != "" && !strings.Contains(text, "次") {
-			// Fallback artist name
-			artists = append(artists, ArtistRef{Name: text})
+			linked = append(linked, ArtistRef{ID: browseID, Name: text})
+			continue
+		}
+		// A name no page backs: the date or the views beside an episode, or
+		// an artist YouTube links nowhere. Keep the first, for a row that
+		// links no artist at all.
+		if fallback == "" && !strings.Contains(text, "次") {
+			fallback = text
 		}
 	}
-	return artists
+	if len(linked) > 0 {
+		return linked
+	}
+	if fallback != "" {
+		return []ArtistRef{{Name: fallback}}
+	}
+	return nil
 }
