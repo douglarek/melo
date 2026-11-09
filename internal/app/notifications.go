@@ -23,14 +23,13 @@ func (a *app) maybeNotifyTrack(t *ytmusic.Track) {
 	if !a.pl.Playing() && !a.pl.PendingPlay() {
 		return
 	}
-	a.notifySeq++
-	seq := a.notifySeq
+	seq := a.notifySeq.Add(1)
 	go a.notifyTrack(t, seq)
 }
 
-func (a *app) notifyTrack(t *ytmusic.Track, seq int) {
+func (a *app) notifyTrack(t *ytmusic.Track, seq int64) {
 	icon := a.notificationIcon(t)
-	if seq != a.notifySeq {
+	if seq != a.notifySeq.Load() {
 		return
 	}
 	n := mygo.NewNotification(a.notificationOptions(t, icon))

@@ -172,7 +172,7 @@ type app struct {
 	lastPlayedTrackID string
 	memoryTimer       *time.Timer
 	notifyTrackID     string
-	notifySeq         int
+	notifySeq         atomic.Int64
 }
 
 func (a *app) post(fn func()) {
