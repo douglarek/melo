@@ -460,6 +460,33 @@ func (a *app) trackListState(key string) *ui.ListState {
 	return s
 }
 
+// playTracksFromPage starts a page's list at idx. A page that pages by
+// continuation — a show's episodes, a playlist's songs — keeps feeding the
+// queue, so a click near its end still holds what comes after.
+func (a *app) playTracksFromPage(tracks []ytmusic.Track, idx int) {
+	if key := a.listedPlaylistKey(); key != "" {
+		if pl := a.playlists[key]; pl != nil && pl.Continuation != "" {
+			a.playListAt(key, tracks, idx)
+			return
+		}
+	}
+	a.pl.SetQueue(tracks, idx)
+}
+
+// listedPlaylistKey is the cached playlist the current page lists, when it
+// pages by continuation.
+func (a *app) listedPlaylistKey() string {
+	switch a.route.page {
+	case pagePlaylist:
+		return playlistKey(a.route.id)
+	case pageLiked:
+		return "LM"
+	case pageArtistSongs:
+		return artistSongsKey(a.route.id)
+	}
+	return ""
+}
+
 func (a *app) pageUsesTrackList() bool {
 	switch a.route.page {
 	case pagePlaylist, pageAlbum, pageLiked, pageArtist, pageArtistSongs:
@@ -1211,7 +1238,7 @@ func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur
 		row.Background(p.hover)
 	}
 	if row.Clicked() {
-		a.pl.SetQueue(tracks, idx)
+		a.playTracksFromPage(tracks, idx)
 	}
 
 	row.Children(func() {

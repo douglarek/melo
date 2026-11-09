@@ -1609,6 +1609,45 @@ func TestPodcastNowPlayingHasNoLyricsTab(t *testing.T) {
 }
 
 // The one tab a podcast has lists its queue, the episode playing included.
+// Clicking an episode of a show that pages keeps the rest of the show coming:
+// the queue takes the next pages as playback nears the end of this one.
+func TestClickingAnEpisodeKeepsTheShowComing(t *testing.T) {
+	a := newTestApp(t)
+	eps := []ytmusic.Track{
+		{ID: "ep1", Title: "第一段", Podcast: true},
+		{ID: "ep2", Title: "第二段", Podcast: true},
+		{ID: "ep3", Title: "第三段", Podcast: true},
+	}
+	a.playlists["MPSPPLshow"] = &ytmusic.Playlist{ID: "MPSPPLshow", Podcast: true, Continuation: "page2", Tracks: eps}
+	a.route = route{page: pagePlaylist, id: "MPSPPLshow"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("第三段"); err != nil {
+		t.Fatalf("click the episode: %v", err)
+	}
+	if cur := a.pl.Current(); cur == nil || cur.ID != "ep3" {
+		t.Fatalf("current = %+v, want the clicked episode", cur)
+	}
+	if !a.pl.Fed() {
+		t.Fatal("the queue has no feed: the show stops at this page")
+	}
+
+	// A page that lists everything it says has no feed to attach.
+	search := newTestApp(t)
+	r := route{page: pageSearch, query: "相声", kind: ytmusic.SearchPodcastEpisodes}
+	search.route = r
+	search.searches[r] = &ytmusic.SearchResult{Tracks: eps}
+	st := ui.NewTester(search.view, 1200, 900)
+	st.Frame()
+	if err := st.Click("第一段"); err != nil {
+		t.Fatalf("click a search result: %v", err)
+	}
+	if search.pl.Fed() {
+		t.Fatal("a search result queue expects a feed")
+	}
+}
+
 func TestPodcastQueueTabShowsTheQueue(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{

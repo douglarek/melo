@@ -852,6 +852,14 @@ func (p *Player) PendingPlay() bool {
 	return p.pendingPlay
 }
 
+// Fed reports whether the queue takes more tracks from a feed as it nears its
+// end, as the episodes of a show do.
+func (p *Player) Fed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.feed != nil
+}
+
 // Active reports whether playback is running or a track is loading to play.
 func (p *Player) Active() bool {
 	p.mu.Lock()

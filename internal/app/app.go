@@ -994,10 +994,17 @@ func appendUniqueTracks(dst, src []ytmusic.Track) []ytmusic.Track {
 // playAllPlaylist starts playing the first page immediately and feeds
 // further pages to the player as the queue nears its end.
 func (a *app) playAllPlaylist(c *ui.Context, key string, tracks []ytmusic.Track) {
+	a.playListAt(key, tracks, 0)
+}
+
+// playListAt starts a list of tracks at at, and keeps feeding its queue while
+// the list has more pages: the episodes of a show arrive a page at a time, so
+// clicking the last one of the page would otherwise end the queue there.
+func (a *app) playListAt(key string, tracks []ytmusic.Track, at int) {
 	if len(tracks) == 0 {
 		return
 	}
-	a.pl.SetQueue(tracks, 0)
+	a.pl.SetQueue(tracks, at)
 	pl := a.playlists[key]
 	if pl == nil || pl.Continuation == "" {
 		return
