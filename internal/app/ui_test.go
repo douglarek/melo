@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image/png"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
@@ -50,17 +52,24 @@ func TestNavGestureLeavesShelvesAlone(t *testing.T) {
 func TestReconcileQueue(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{
-		{ID: "a", Title: "A", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+		{ID: "a", Title: "A"},
 		{ID: "dead", Title: "粉红色的回忆", Artists: []ytmusic.ArtistRef{{Name: "韩宝仪"}}},
 		{ID: "b", Title: "B", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
 	}, 1)
 	a.reconcileQueue(&ytmusic.Playlist{Tracks: []ytmusic.Track{
-		{ID: "a", Title: "A", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+		{ID: "a", Title: "A", Artists: []ytmusic.ArtistRef{{Name: "Y"}}, Podcast: true},
 		{ID: "b", Title: "B", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
-		{ID: "new", Title: "粉红色的回忆", Artists: []ytmusic.ArtistRef{{Name: "韩宝仪"}}},
+		{ID: "new", Title: "粉红色的回忆", Artists: []ytmusic.ArtistRef{{Name: "韩宝仪"}}, Podcast: true},
 	}})
-	if got := a.pl.Queue()[1].ID; got != "new" {
+	queue := a.pl.Queue()
+	if got := queue[1].ID; got != "new" {
 		t.Fatalf("queue id = %s, want new", got)
+	}
+	if !queue[0].Podcast || !queue[1].Podcast || queue[2].Podcast {
+		t.Fatalf("podcast flags = %v %v %v", queue[0].Podcast, queue[1].Podcast, queue[2].Podcast)
+	}
+	if got := queue[0].ArtistNames(); got != "Y" {
+		t.Fatalf("queue artists = %q, want the playlist's", got)
 	}
 }
 
@@ -967,8 +976,8 @@ func TestActiveLyricLine(t *testing.T) {
 
 func TestToggleLikeFillsDurationFromPlayer(t *testing.T) {
 	a := newTestApp(t)
-	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		return &ytmusic.StreamInfo{VideoID: id, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
+	a.pl.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		return &ytmusic.StreamInfo{VideoID: track.ID, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
 	}
 	a.pl.SetQueue([]ytmusic.Track{{ID: "track1", Title: "晴天"}}, 0)
 
@@ -1639,7 +1648,7 @@ func TestPlayerBarLoadingState(t *testing.T) {
 	a := newTestApp(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	a.pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	a.pl.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		close(started)
 		<-release
 		return nil, context.Canceled
@@ -1797,5 +1806,95 @@ func TestRenderScenes(t *testing.T) {
 				f.Close()
 			}
 		}
+	}
+}
+
+// TestLikedPlaylistShowsCachedSongs checks the liked playlist the library
+// lists by YouTube's own ID, which is not the LM the cached songs live under:
+// the page must play the songs it has rather than wait forever for a playlist
+// it never fetches.
+func TestLikedPlaylistShowsCachedSongs(t *testing.T) {
+	a := newTestApp(t)
+	a.profile = &ytmusic.Profile{Name: "测试用户"}
+	a.liked = []ytmusic.Track{
+		{ID: "track1", Title: "晴天"},
+		{ID: "track2", Title: "七里香"},
+	}
+	a.open(route{page: pagePlaylist, id: "VLLM"})
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("播放全部 (2 首)"); err != nil {
+		t.Fatalf("liked playlist did not render its songs: %v", err)
+	}
+	tt.Frame()
+	if cur := a.pl.Current(); cur == nil || cur.Title != "晴天" {
+		t.Fatalf("playing the liked songs started %+v", cur)
+	}
+	if got := len(a.pl.Queue()); got != 2 {
+		t.Fatalf("queue = %d tracks, want 2", got)
+	}
+}
+
+// TestLikedPlaylistFetchesWhenEmpty checks that a liked page with nothing
+// cached asks for the songs, and that the answered page plays them.
+func TestLikedPlaylistFetchesWhenEmpty(t *testing.T) {
+	a := newTestApp(t)
+	a.profile = &ytmusic.Profile{Name: "测试用户"}
+	asked := make(chan struct{}, 1)
+	old := browseLikedSongs
+	browseLikedSongs = func(ctx context.Context) (*ytmusic.Playlist, error) {
+		asked <- struct{}{}
+		return &ytmusic.Playlist{ID: "LM", Title: "赞过的音乐"}, nil
+	}
+	t.Cleanup(func() { browseLikedSongs = old })
+
+	a.loadLiked()
+	select {
+	case <-asked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the liked page did not ask for the songs")
+	}
+	if !a.likedLoading {
+		t.Fatal("a page waiting for the liked songs does not know it is loading")
+	}
+
+	// What the fetch's callback does once the window takes it.
+	a.likedLoading = false
+	a.playlists["LM"] = &ytmusic.Playlist{ID: "LM", Title: "赞过的音乐", Tracks: []ytmusic.Track{{ID: "track1", Title: "晴天"}}}
+	a.liked = append([]ytmusic.Track(nil), a.playlists["LM"].Tracks...)
+
+	a.open(route{page: pagePlaylist, id: "VLLM"})
+	a.likedLoading = false
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("播放全部 (1 首)"); err != nil {
+		t.Fatalf("liked playlist did not render the fetched songs: %v", err)
+	}
+	if cur := a.pl.Current(); cur == nil || cur.Title != "晴天" {
+		t.Fatalf("playing the liked songs started %+v", cur)
+	}
+}
+
+// TestRestoredQueueLearnsItsPodcasts checks the kind a queue saved before a
+// track carried it: its episodes still play from their show's feed.
+func TestRestoredQueueLearnsItsPodcasts(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppAt(t, dir)
+	saved := player.Session{Queue: []ytmusic.Track{
+		{ID: "ep", Title: "《生活.COM》郭德纲 于谦", Thumbnail: "https://lh3.googleusercontent.com/youtube-podcasts-ingestion-proxy/ALXq/episode.jpg"},
+		{ID: "song", Title: "晴天", Thumbnail: "https://lh3.googleusercontent.com/abc/song.jpg"},
+	}}
+	data, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "player.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.restorePlayerSession()
+	queue := a.pl.Queue()
+	if len(queue) != 2 || !queue[0].Podcast || queue[1].Podcast {
+		t.Fatalf("restored queue = %+v", queue)
 	}
 }

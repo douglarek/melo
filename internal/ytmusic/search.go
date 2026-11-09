@@ -156,6 +156,7 @@ func parseCardShelf(card map[string]any, res *SearchResult) {
 			Thumbnails: thumbs,
 			Artists:    []ArtistRef{{Name: subtitle}},
 			Video:      itemHasMusicVideo(card),
+			Podcast:    itemHasPodcastEpisode(card),
 		})
 		return
 	}
@@ -297,6 +298,7 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 			Thumbnail:  thumbURL,
 			Thumbnails: thumbs,
 			Video:      itemHasMusicVideo(r),
+			Podcast:    itemHasPodcastEpisode(r),
 		})
 	case strings.Contains(subtitle, "音乐人") || strings.Contains(subtitle, "Artist"):
 		res.Artists = append(res.Artists, ArtistRef{ID: browseID, Name: title, Thumbnail: thumbURL})

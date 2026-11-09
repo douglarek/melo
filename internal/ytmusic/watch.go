@@ -113,6 +113,7 @@ func (c *Client) GetNext(ctx context.Context, videoID string, playlistID string)
 									DurationMs: ParseDurationMs(durText),
 									Thumbnail:  BestThumbnail(thumbs),
 									Thumbnails: thumbs,
+									Podcast:    itemHasPodcastEpisode(r),
 								})
 							}
 						}
@@ -537,7 +538,15 @@ var ErrUnavailable = errors.New("track is not available")
 // ResolveStream resolves the sound to play: a SABR download (AAC 128 kbps)
 // when it is configured and works, else the ANDROID client's stream, which
 // is reliable and progressive when it has it, or else the HLS one iOS serves.
-func (c *Client) ResolveStream(ctx context.Context, videoID string) (*StreamInfo, error) {
+// A podcast episode has no stream of its own: the signed-in web client names
+// the file of its show's feed, which is where it plays from.
+func (c *Client) ResolveStream(ctx context.Context, track Track) (*StreamInfo, error) {
+	videoID := track.ID
+	if track.Podcast {
+		if info, err := c.resolvePodcast(ctx, videoID); err == nil {
+			return info, nil
+		}
+	}
 	sabrErr := error(nil)
 	if info, err := c.resolveSabrFile(ctx, videoID); err == nil {
 		return info, nil

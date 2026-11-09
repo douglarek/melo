@@ -44,7 +44,7 @@ type Player struct {
 	// Error reports a stream that could not be resolved, on the UI thread.
 	Error   func(videoID string, err error)
 	Cache   *Cache
-	Resolve func(ctx context.Context, id string) (*ytmusic.StreamInfo, error)
+	Resolve func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error)
 
 	ctx     context.Context
 	loadWG  sync.WaitGroup
@@ -380,7 +380,6 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 	p.playCurrent()
 }
 
-// PlayTrack sets a single track as queue and plays it.
 // UpdateTracks replaces the queue's entries without moving the current
 // track or stopping playback, for tracks a playlist has refreshed.
 func (p *Player) UpdateTracks(tracks []ytmusic.Track) {
@@ -394,6 +393,7 @@ func (p *Player) UpdateTracks(tracks []ytmusic.Track) {
 	p.changed()
 }
 
+// PlayTrack sets a single track as queue and plays it.
 func (p *Player) PlayTrack(track ytmusic.Track) {
 	p.SetQueue([]ytmusic.Track{track}, 0)
 }
@@ -500,7 +500,7 @@ func (p *Player) playCurrent() {
 
 	// Load the stream asynchronously.
 	p.loadWG.Go(func() {
-		info, err := resolver(ctx, track.ID)
+		info, err := resolver(ctx, track)
 		if err != nil {
 			p.post(func() {
 				p.failLoad(gen, track, err)
@@ -550,6 +550,8 @@ func (p *Player) playCurrent() {
 			}
 		case info.LocalPath != "":
 			st, err = openMP4Stream(info.LocalPath)
+		case info.Format == "mp3" && info.DirectURL != "":
+			st, err = openMP3Stream(ctx, info)
 		case info.Format == "mp4" && info.DirectURL != "":
 			cachePath := p.Cache.Path(info.VideoID, "mp4")
 			durMs := track.DurationMs

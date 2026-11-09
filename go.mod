@@ -8,6 +8,7 @@ require (
 	github.com/egoist/mygo v0.8.3
 	github.com/tphakala/go-aac v0.7.2
 	github.com/tphakala/go-m4a v0.8.0
+	github.com/tphakala/go-mp3 v0.3.0
 	golang.org/x/image v0.47.0
 )
 

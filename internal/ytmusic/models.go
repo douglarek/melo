@@ -95,6 +95,9 @@ type Track struct {
 	Liked      bool        `json:"liked"`
 	Explicit   bool        `json:"explicit"`
 	Video      bool        `json:"video,omitempty"`
+	// Podcast marks an RSS-hosted podcast episode, whose sound YouTube
+	// serves from the show's feed rather than its own.
+	Podcast bool `json:"podcast,omitempty"`
 }
 
 // ArtistNames formats the artist names as a comma-separated string.

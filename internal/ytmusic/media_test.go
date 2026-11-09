@@ -110,3 +110,55 @@ func TestParseResponsiveCardDetectsVideoFromTitleRun(t *testing.T) {
 		})
 	}
 }
+
+// TestItemHasPodcastEpisode checks that a podcast episode is told from a
+// music video by the type its endpoints carry, so that its sound resolves
+// from the show's feed rather than after the other clients refuse it.
+func TestItemHasPodcastEpisode(t *testing.T) {
+	run := func(videoType string) map[string]any {
+		return map[string]any{"text": "Title", "navigationEndpoint": musicNav(videoType)}
+	}
+	tests := []struct {
+		name string
+		item map[string]any
+		want bool
+	}{
+		{
+			name: "overlay play button",
+			item: map[string]any{
+				"overlay": map[string]any{
+					"musicItemThumbnailOverlayRenderer": map[string]any{
+						"content": map[string]any{
+							"musicPlayButtonRenderer": map[string]any{
+								"playNavigationEndpoint": musicNav("MUSIC_VIDEO_TYPE_PODCAST_EPISODE"),
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "title run",
+			item: map[string]any{"title": map[string]any{"runs": []any{run("MUSIC_VIDEO_TYPE_PODCAST_EPISODE")}}},
+			want: true,
+		},
+		{
+			name: "music video",
+			item: map[string]any{"navigationEndpoint": musicNav("MUSIC_VIDEO_TYPE_OMV")},
+			want: false,
+		},
+		{
+			name: "no video type",
+			item: map[string]any{"navigationEndpoint": map[string]any{}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := itemHasPodcastEpisode(tt.item); got != tt.want {
+				t.Fatalf("itemHasPodcastEpisode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

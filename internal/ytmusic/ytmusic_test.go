@@ -248,7 +248,11 @@ func TestParseMultiRowPodcastTrack(t *testing.T) {
 		"title": {"runs": [{"text": "04 三山五園的權力密碼"}]},
 		"subtitle": {"runs": [{"text": "15次观看"}, {"text": " • "}, {"text": "8月9日"}]},
 		"playbackProgress": {"musicPlaybackProgressRenderer": {"durationText": {"runs": [{"text": " • "}, {"text": "21分钟"}]}}},
-		"onTap": {"watchEndpoint": {"videoId": "A9uCt7l8Qh4"}},
+		"secondTitle": {"runs": [{"text": "相声汇", "navigationEndpoint": {"browseEndpoint": {
+			"browseId": "MPSPPLtest",
+			"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"}}
+		}}}]},
+		"onTap": {"watchEndpoint": {"videoId": "A9uCt7l8Qh4", "watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"}}}},
 		"thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
 			{"url": "//example.com/episode.jpg", "width": 400, "height": 225}
 		]}}}
@@ -269,6 +273,29 @@ func TestParseMultiRowPodcastTrack(t *testing.T) {
 	}
 	if track.Thumbnail != "https://example.com/episode.jpg" {
 		t.Errorf("thumbnail = %q", track.Thumbnail)
+	}
+	if !track.Podcast {
+		t.Error("a podcast episode's row is not marked a podcast")
+	}
+	if track.ArtistNames() != "相声汇" {
+		t.Errorf("artists = %q, want the show", track.ArtistNames())
+	}
+}
+
+// TestParseMultiRowVideoIsNotAPodcast checks that the same renderer's video
+// rows, which a home shelf lists as covers, stay plain tracks.
+func TestParseMultiRowVideoIsNotAPodcast(t *testing.T) {
+	raw := `{
+		"title": {"runs": [{"text": "煙火裡的塵埃"}]},
+		"onTap": {"watchEndpoint": {"videoId": "_eHVE7GJ7lc", "watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_UGC"}}}},
+		"thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [{"url": "//example.com/v.jpg"}]}}}
+	}`
+	var r map[string]any
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if track := parseMultiRowTrack(r); track.Podcast {
+		t.Fatalf("a video's row is marked a podcast: %+v", track)
 	}
 }
 
@@ -303,5 +330,31 @@ func TestPickAudioPlaylist(t *testing.T) {
 	chosen := pickAudioPlaylist(masterM3U8)
 	if chosen != "https://manifest.googlevideo.com/api/manifest/hls_playlist/itag/234/playlist.m3u8" {
 		t.Errorf("unexpected audio playlist: %s", chosen)
+	}
+}
+
+// TestParseTwoRowPodcastEpisode checks that an episode's page, which a home
+// shelf lists as a card, is the episode itself: clicking it plays the sound
+// instead of opening a playlist page that has none.
+func TestParseTwoRowPodcastEpisode(t *testing.T) {
+	raw := `{
+		"title": {"runs": [{"text": "《嫂子有外遇》郭德纲 于谦"}]},
+		"subtitle": {"runs": [{"text": "还剩 2 分钟 • 相声汇"}]},
+		"navigationEndpoint": {"browseEndpoint": {
+			"browseId": "MPEDOA9gCgZajcs",
+			"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"}}
+		}},
+		"thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [{"url": "//example.com/ep.jpg"}]}}}
+	}`
+	var item map[string]any
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	card := parseTwoRowItem(item)
+	if card.Type != "track" || card.ID != "OA9gCgZajcs" {
+		t.Fatalf("card = %+v, want the episode's track", card)
+	}
+	if card.Track == nil || !card.Track.Podcast {
+		t.Fatalf("card track = %+v", card.Track)
 	}
 }

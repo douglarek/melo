@@ -711,33 +711,49 @@ func (a *app) renderCardWithArt(c *ui.Context, item ytmusic.CardItem, loadArt bo
 }
 
 func (a *app) viewPlaylist(c *ui.Context) {
-	if isLikedPlaylistID(a.route.id) && a.profile == nil {
+	liked := isLikedPlaylistID(a.route.id)
+	if liked && a.profile == nil {
 		a.viewLiked(c)
 		return
 	}
-	p := a.pal
-	if a.playlistRefreshing[a.route.id] {
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
-			ui.Spinner(c)
-			ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
-		})
+	if liked {
+		a.loadLiked()
+	} else if a.playlistRefreshing[a.route.id] {
+		a.playlistLoading(c)
 		return
 	}
 	pl := a.playlists[a.route.id]
+	if liked {
+		if pl == nil {
+			pl = a.playlists["LM"]
+		}
+		if pl == nil {
+			pl = &ytmusic.Playlist{ID: a.route.id, Title: locales.LikedMusic()}
+		}
+	}
 	if pl == nil {
-		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-			ui.Spinner(c)
-			ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
-		})
+		a.playlistLoading(c)
 		return
 	}
-
 	tracks := pl.Tracks
-	if isLikedPlaylistID(a.route.id) || isLikedPlaylistID(pl.ID) {
+	if liked || isLikedPlaylistID(pl.ID) {
 		tracks = a.likedTracks()
+		if len(tracks) == 0 && a.likedLoading {
+			a.playlistLoading(c)
+			return
+		}
 	}
 	a.maybeLoadMorePlaylist(c)
 	a.playlistTrackList(c, pl, tracks)
+}
+
+// playlistLoading fills the page while its playlist is on its way.
+func (a *app) playlistLoading(c *ui.Context) {
+	p := a.pal
+	ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
+		ui.Spinner(c)
+		ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
+	})
 }
 
 func (a *app) playlistTrackList(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
@@ -1074,6 +1090,10 @@ func (a *app) viewLiked(c *ui.Context) {
 	a.maybeLoadMorePlaylist(c)
 
 	if len(tracks) == 0 {
+		if a.likedLoading {
+			a.playlistLoading(c)
+			return
+		}
 		ui.Column(c).FillWidth().Gap(24).Children(func() {
 			a.likedHeader(c, likedPlaylist, tracks, total)
 			a.likedEmpty(c)

@@ -2,15 +2,16 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/douglarek/melo/locales"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
 
 	"github.com/douglarek/melo/internal/player"
 	"github.com/douglarek/melo/internal/ytmusic"
+	"github.com/douglarek/melo/locales"
 )
 
 type libraryCache struct {
@@ -85,7 +86,19 @@ func (a *app) restorePlayerSession() {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return
 	}
+	markSavedPodcasts(sess.Queue)
 	a.pl.Restore(sess)
+}
+
+// markSavedPodcasts fills the kind of the episodes a session saved before a
+// track carried it. YouTube serves a podcast episode's art through its
+// ingestion proxy, which is what such a queue still holds.
+func markSavedPodcasts(tracks []ytmusic.Track) {
+	for i := range tracks {
+		if strings.Contains(tracks[i].Thumbnail, "youtube-podcasts-ingestion-proxy") {
+			tracks[i].Podcast = true
+		}
+	}
 }
 
 func (a *app) saveLibraryCache() {

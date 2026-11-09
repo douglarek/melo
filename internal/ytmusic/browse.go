@@ -361,6 +361,7 @@ func parseTwoRowItem(t map[string]any) CardItem {
 
 	we, _ := nav["watchEndpoint"].(map[string]any)
 	videoID, _ := we["videoId"].(string)
+	episodeID, episode := podcastEpisodeID(browseID)
 
 	itemType := "playlist"
 	id := browseID
@@ -371,13 +372,17 @@ func parseTwoRowItem(t map[string]any) CardItem {
 		itemType = "album"
 	case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL"):
 		itemType = "playlist"
+	case episode:
+		itemType = "track"
+		id = episodeID
 	case videoID != "":
 		itemType = "track"
 		id = videoID
 	}
 
 	var track *Track
-	if itemType == "track" && videoID != "" {
+	switch {
+	case itemType == "track" && videoID != "":
 		track = &Track{
 			ID:         videoID,
 			Title:      title,
@@ -386,6 +391,16 @@ func parseTwoRowItem(t map[string]any) CardItem {
 			Thumbnails: thumbs,
 			Artists:    []ArtistRef{{Name: subtitle}},
 			Video:      itemHasMusicVideo(t),
+			Podcast:    itemHasPodcastEpisode(t),
+		}
+	case itemType == "track" && episode:
+		track = &Track{
+			ID:         episodeID,
+			Title:      title,
+			Artists:    podcastShowArtists(t),
+			Thumbnail:  thumbURL,
+			Thumbnails: thumbs,
+			Podcast:    true,
 		}
 	}
 
@@ -501,6 +516,7 @@ func parseResponsiveAsCard(r map[string]any) CardItem {
 			Thumbnails: thumbs,
 			Artists:    artists,
 			Video:      itemHasMusicVideo(r),
+			Podcast:    itemHasPodcastEpisode(r),
 		}
 	}
 
@@ -703,8 +719,10 @@ func firstContinuation(raw any) string {
 	return ""
 }
 
-// parseMultiRowTrack parses podcast episode rows, which carry their video ID
-// on the tap endpoint and their length as localized text such as "21分钟".
+// parseMultiRowTrack parses a row of a music multi-row list, which carries
+// its video ID on the tap endpoint and its length as localized text such as
+// "21分钟". The renderer lists videos as well as podcast episodes, so the
+// row's own endpoint says which it is.
 func parseMultiRowTrack(r map[string]any) Track {
 	title := RunsToString(r["title"])
 
@@ -732,9 +750,11 @@ func parseMultiRowTrack(r map[string]any) Track {
 	return Track{
 		ID:         videoID,
 		Title:      title,
+		Artists:    podcastShowArtists(r),
 		DurationMs: durationMs,
 		Thumbnail:  BestThumbnail(thumbs),
 		Thumbnails: thumbs,
+		Podcast:    itemHasPodcastEpisode(r),
 	}
 }
 
@@ -864,6 +884,7 @@ func parseTrackFromListItem(r map[string]any) Track {
 		Thumbnail:  BestThumbnail(thumbs),
 		Thumbnails: thumbs,
 		Video:      itemHasMusicVideo(r),
+		Podcast:    itemHasPodcastEpisode(r),
 	}
 }
 
@@ -1476,17 +1497,4 @@ func (c *Client) UnlikeSong(ctx context.Context, videoID string) error {
 	}
 	_, err := c.post(ctx, "like/removelike", body, nil)
 	return err
-}
-
-// hasMusicVideo reports whether a watch endpoint is a music video rather
-// than an audio art track.
-func hasMusicVideo(nav map[string]any) bool {
-	if nav == nil {
-		return false
-	}
-	watch, _ := nav["watchEndpoint"].(map[string]any)
-	supported, _ := watch["watchEndpointMusicSupportedConfigs"].(map[string]any)
-	config, _ := supported["watchEndpointMusicConfig"].(map[string]any)
-	videoType, _ := config["musicVideoType"].(string)
-	return videoType != "" && videoType != "MUSIC_VIDEO_TYPE_ATV"
 }

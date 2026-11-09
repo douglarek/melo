@@ -16,7 +16,7 @@ func newTestPlayer(t *testing.T) *Player {
 	t.Helper()
 	p := New(func(fn func()) { fn() })
 	p.Cache = NewCache(t.TempDir(), 0)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		return nil, errors.New("test mock offline")
 	}
 	return p
@@ -24,7 +24,7 @@ func newTestPlayer(t *testing.T) *Player {
 
 func TestChangedCallbackRunsOutsidePlayerLock(t *testing.T) {
 	p := newTestPlayer(t)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		return nil, errors.New("resolver failed")
 	}
 
@@ -107,7 +107,7 @@ func TestCloseInvalidatesPendingLoad(t *testing.T) {
 func TestPlayerCloseCancelsLoad(t *testing.T) {
 	p := newTestPlayer(t)
 	started := make(chan struct{})
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -139,7 +139,7 @@ func TestSeekDuringLoadIsRetained(t *testing.T) {
 	p := newTestPlayer(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		close(started)
 		<-release
 		return nil, errors.New("load failed")
@@ -282,8 +282,8 @@ func TestRestoreKeepsRadioIdentity(t *testing.T) {
 
 func TestPlayerResolvedDurationUpdatesQueue(t *testing.T) {
 	p := newTestPlayer(t)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		return &ytmusic.StreamInfo{VideoID: id, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 123000}, nil
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		return &ytmusic.StreamInfo{VideoID: track.ID, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 123000}, nil
 	}
 	p.SetQueue([]ytmusic.Track{{ID: "v1", Title: "Song"}}, 0)
 
@@ -442,7 +442,7 @@ func TestPlayerLoadingState(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	p := newTestPlayer(t)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		close(started)
 		<-release
 		return nil, errors.New("test stop")
@@ -594,8 +594,8 @@ func TestPlayerQueueViewAndPlayAt(t *testing.T) {
 
 func TestPlayerFillsResolvedDuration(t *testing.T) {
 	p := newTestPlayer(t)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		return &ytmusic.StreamInfo{VideoID: id, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		return &ytmusic.StreamInfo{VideoID: track.ID, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
 	}
 	p.SetQueue([]ytmusic.Track{{ID: "v1", Title: "Song"}}, 0)
 
@@ -611,8 +611,8 @@ func TestPlayerFillsResolvedDuration(t *testing.T) {
 
 func TestPlayerReportsResolvedDuration(t *testing.T) {
 	p := newTestPlayer(t)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		return &ytmusic.StreamInfo{VideoID: id, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		return &ytmusic.StreamInfo{VideoID: track.ID, Format: "mp4", DirectURL: "http://127.0.0.1:1/none", DurationMs: 269000}, nil
 	}
 	got := make(chan int64, 1)
 	p.DurationResolved = func(id string, durationMs int64) {
@@ -648,9 +648,9 @@ func TestSetQueueCopiesTracks(t *testing.T) {
 func TestUnavailableTrackIsSkipped(t *testing.T) {
 	p := newTestPlayer(t)
 	asked := make(chan string, 8)
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
-		asked <- id
-		if id == "v1" {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		asked <- track.ID
+		if track.ID == "v1" {
 			return nil, fmt.Errorf("sabr player: %w", ytmusic.ErrUnavailable)
 		}
 		return nil, errors.New("network is down")
@@ -691,7 +691,7 @@ func TestUnavailableTrackIsSkipped(t *testing.T) {
 func TestQueueOfUnavailableTracksStops(t *testing.T) {
 	p := newTestPlayer(t)
 	var attempts atomic.Int32
-	p.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		attempts.Add(1)
 		return nil, ytmusic.ErrUnavailable
 	}
@@ -722,5 +722,27 @@ func TestQueueOfUnavailableTracksStops(t *testing.T) {
 	}
 	if p.Active() {
 		t.Fatal("playback should be stopped once every track failed")
+	}
+}
+
+// TestResolveSeesTheTrackKind checks that the resolver gets the entry the
+// player plays, so a podcast episode resolves from its show's feed instead
+// of failing over every other client first.
+func TestResolveSeesTheTrackKind(t *testing.T) {
+	p := newTestPlayer(t)
+	asked := make(chan ytmusic.Track, 1)
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		asked <- track
+		return nil, errors.New("test stop")
+	}
+	p.SetQueue([]ytmusic.Track{{ID: "ep", Title: "Episode", Podcast: true}}, 0)
+
+	select {
+	case track := <-asked:
+		if track.ID != "ep" || !track.Podcast {
+			t.Fatalf("resolved %+v, want the podcast episode", track)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the resolver did not see the track")
 	}
 }

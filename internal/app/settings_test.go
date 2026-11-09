@@ -114,7 +114,7 @@ func TestClearCacheKeepsPlayingTrack(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "cache")
 	cache := player.NewCache(dir, 1<<30)
 	a.pl.Cache = cache
-	a.pl.Resolve = func(context.Context, string) (*ytmusic.StreamInfo, error) {
+	a.pl.Resolve = func(context.Context, ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		return nil, errors.New("no stream in the test")
 	}
 	a.pl.SetQueue([]ytmusic.Track{{ID: "active", Title: "Active"}}, 0)

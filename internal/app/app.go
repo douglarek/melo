@@ -136,11 +136,14 @@ type app struct {
 	shelfRects   []ui.Rect
 	// navDir is the last navigation's direction: -1 back, 1 forward or into
 	// a page.
-	navDir   int
-	liked    []ytmusic.Track
-	tray     *mygo.Tray
-	trayErr  error
-	quitting bool
+	navDir int
+	liked  []ytmusic.Track
+	// likedLoading says the liked songs are being fetched, so a page
+	// waiting for them shows a spinner rather than an empty list.
+	likedLoading bool
+	tray         *mygo.Tray
+	trayErr      error
+	quitting     bool
 
 	libraryPlaylists   []ytmusic.PlaylistItem
 	playlistRefreshing map[string]bool
@@ -477,7 +480,9 @@ func (a *app) routeKey() string {
 
 // reconcileQueue replaces queue entries a playlist no longer lists with the
 // playlist's current entry of the same song, as when a removed upload is
-// replaced. It leaves a queue that came from elsewhere alone.
+// replaced, and takes that entry's kind, so a queue stored before a podcast
+// was known as one plays it from the show's feed. It leaves a queue that came
+// from elsewhere alone.
 func (a *app) reconcileQueue(pl *ytmusic.Playlist) {
 	queue := a.pl.Queue()
 	if len(queue) == 0 {
@@ -497,21 +502,44 @@ func (a *app) reconcileQueue(pl *ytmusic.Playlist) {
 		return
 	}
 	changed := false
-	for i, q := range queue {
-		if inPlaylist[q.ID] {
+	for i := range queue {
+		t := playlistEntry(pl.Tracks, queue[i])
+		if t == nil {
 			continue
 		}
-		for _, t := range pl.Tracks {
-			if t.ID != q.ID && sameSong(t, q) {
-				queue[i].ID = t.ID
-				changed = true
-				break
-			}
+		if t.ID != queue[i].ID {
+			queue[i].ID = t.ID
+			changed = true
+		}
+		if t.Podcast != queue[i].Podcast || t.Video != queue[i].Video {
+			queue[i].Podcast = t.Podcast
+			queue[i].Video = t.Video
+			changed = true
+		}
+		if len(queue[i].Artists) == 0 && len(t.Artists) > 0 {
+			queue[i].Artists = t.Artists
+			changed = true
 		}
 	}
 	if changed {
 		a.pl.UpdateTracks(queue)
 	}
+}
+
+// playlistEntry returns the playlist track a queue entry is, by video ID or
+// by the song it names, and nil when the playlist has neither.
+func playlistEntry(tracks []ytmusic.Track, q ytmusic.Track) *ytmusic.Track {
+	for i := range tracks {
+		if tracks[i].ID == q.ID {
+			return &tracks[i]
+		}
+	}
+	for i := range tracks {
+		if sameSong(tracks[i], q) {
+			return &tracks[i]
+		}
+	}
+	return nil
 }
 
 func sameSong(a, b ytmusic.Track) bool {
@@ -562,6 +590,7 @@ func (a *app) loadCurrentRoute() {
 	case pagePlaylist:
 		id := a.route.id
 		if isLikedPlaylistID(id) {
+			a.loadLiked()
 			return
 		}
 		if a.playlistRefreshing == nil {
@@ -661,19 +690,7 @@ func (a *app) loadCurrentRoute() {
 			}()
 		}
 	case pageLiked:
-		if (a.playlists["LM"] == nil || len(a.liked) == 0) && a.profile != nil {
-			go func() {
-				liked, _ := ytmusic.DefaultClient.BrowseLikedSongs(ctx)
-				if liked != nil {
-					a.post(func() {
-						a.playlists["LM"] = liked
-						if len(liked.Tracks) > 0 {
-							a.liked = append([]ytmusic.Track(nil), liked.Tracks...)
-						}
-					})
-				}
-			}()
-		}
+		a.loadLiked()
 	case pageCategory:
 		id, params := a.route.id, a.route.params
 		key := categoryKey(id, params)
@@ -972,12 +989,12 @@ func appendUniqueTracks(dst, src []ytmusic.Track) []ytmusic.Track {
 // playAllPlaylist starts playing the first page immediately and feeds
 // further pages to the player as the queue nears its end.
 func (a *app) playAllPlaylist(c *ui.Context, key string, tracks []ytmusic.Track) {
-	pl := a.playlists[key]
-	if pl == nil || len(tracks) == 0 {
+	if len(tracks) == 0 {
 		return
 	}
 	a.pl.SetQueue(tracks, 0)
-	if pl.Continuation == "" {
+	pl := a.playlists[key]
+	if pl == nil || pl.Continuation == "" {
 		return
 	}
 	token := pl.Continuation
@@ -1021,4 +1038,39 @@ func (a *app) isLiked(videoID string) bool {
 		}
 	}
 	return false
+}
+
+// browseLikedSongs fetches the liked songs, a seam the tests stub.
+var browseLikedSongs = func(ctx context.Context) (*ytmusic.Playlist, error) {
+	return ytmusic.DefaultClient.BrowseLikedSongs(ctx)
+}
+
+// loadLiked fetches the liked songs when nothing holds them yet, as a first
+// run or a cache an earlier session left empty does. The library and the
+// liked playlist both open it, and a page waiting shows a spinner while it
+// is fetched.
+func (a *app) loadLiked() {
+	if a.profile == nil || a.likedLoading || len(a.liked) > 0 {
+		return
+	}
+	if pl := a.playlists["LM"]; pl != nil && len(pl.Tracks) > 0 {
+		return
+	}
+	a.likedLoading = true
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		liked, _ := browseLikedSongs(ctx)
+		a.post(func() {
+			a.likedLoading = false
+			if liked == nil {
+				return
+			}
+			a.playlists["LM"] = liked
+			if len(liked.Tracks) > 0 {
+				a.liked = append([]ytmusic.Track(nil), liked.Tracks...)
+			}
+			a.saveLibraryCache()
+		})
+	}()
 }

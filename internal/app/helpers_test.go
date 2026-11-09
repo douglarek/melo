@@ -41,7 +41,7 @@ func newTestAppAt(t *testing.T, dataDir string) *app {
 	}
 
 	pl := player.New(func(fn func()) { fn() })
-	pl.Resolve = func(ctx context.Context, id string) (*ytmusic.StreamInfo, error) {
+	pl.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		return nil, errors.New("test mock offline")
 	}
 	a.pl = pl
