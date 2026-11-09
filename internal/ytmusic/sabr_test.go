@@ -29,6 +29,20 @@ func umpEncode(v int) []byte {
 	}
 }
 
+func TestReadUMPVarintRejectsHugeSize(t *testing.T) {
+	huge := []byte{0xf0, 0xff, 0xff, 0xff, 0xff}
+	if _, _, ok := readUMPVarint(huge, 0); ok {
+		t.Fatal("accepted a varint above MaxInt32")
+	}
+	if _, err := parseUMP(append([]byte{0}, huge...)); err == nil {
+		t.Fatal("parseUMP accepted a huge payload size")
+	}
+	small := []byte{0xf0, 0x01, 0, 0, 0}
+	if v, n, ok := readUMPVarint(small, 0); !ok || v != 1 || n != 5 {
+		t.Fatalf("small five-byte varint = %d/%d/%v", v, n, ok)
+	}
+}
+
 func TestUMPParse(t *testing.T) {
 	payload := bytes.Repeat([]byte{7}, 300)
 	var body bytes.Buffer

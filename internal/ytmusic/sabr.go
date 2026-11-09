@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -192,19 +193,23 @@ func readUMPVarint(b []byte, pos int) (v, size int, ok bool) {
 	if pos+size > len(b) {
 		return 0, 0, false
 	}
+	var size64 int64
 	switch size {
 	case 1:
-		v = int(b0)
+		size64 = int64(b0)
 	case 2:
-		v = int(b0&0x3f) + int(b[pos+1])*64
+		size64 = int64(b0&0x3f) + int64(b[pos+1])*64
 	case 3:
-		v = int(b0&0x1f) + int(b[pos+1])*32 + int(b[pos+2])*8192
+		size64 = int64(b0&0x1f) + int64(b[pos+1])*32 + int64(b[pos+2])*8192
 	case 4:
-		v = int(b0&0x0f) + int(b[pos+1])*16 + int(b[pos+2])*4096 + int(b[pos+3])*1048576
+		size64 = int64(b0&0x0f) + int64(b[pos+1])*16 + int64(b[pos+2])*4096 + int64(b[pos+3])*1048576
 	case 5:
-		v = int(b[pos+1]) + int(b[pos+2])*256 + int(b[pos+3])*65536 + int(b[pos+4])*16777216
+		size64 = int64(b[pos+1]) + int64(b[pos+2])*256 + int64(b[pos+3])*65536 + int64(b[pos+4])*16777216
 	}
-	return v, size, true
+	if size64 > math.MaxInt32 {
+		return 0, 0, false
+	}
+	return int(size64), size, true
 }
 
 func parseUMP(b []byte) ([]umpPart, error) {
@@ -216,7 +221,7 @@ func parseUMP(b []byte) ([]umpPart, error) {
 		}
 		pos += n
 		size, n, ok := readUMPVarint(b, pos)
-		if !ok || pos+n+size > len(b) {
+		if !ok || size < 0 || pos+n+size > len(b) {
 			return nil, errors.New("sabr: truncated UMP payload")
 		}
 		pos += n
