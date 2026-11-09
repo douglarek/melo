@@ -70,12 +70,11 @@ func (s *settings) save() {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	b, _ := json.MarshalIndent(s, "", "  ")
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
 		return
 	}
-	_ = os.Chmod(path, 0o600)
+	_ = writeFileAtomic(path, b)
 }
 
 var setThemeSource = func(src mygo.ThemeSource) {

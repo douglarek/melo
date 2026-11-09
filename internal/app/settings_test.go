@@ -30,6 +30,26 @@ func TestCloseToTraySetting(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicReplacesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"old":true}`), 0o600); err != nil {
+		t.Fatalf("write old: %v", err)
+	}
+	if err := writeFileAtomic(path, []byte(`{"new":true}`)); err != nil {
+		t.Fatalf("atomic write: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(data) != `{"new":true}` {
+		t.Fatalf("file = %q, want the new contents", data)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary file left: %v", err)
+	}
+}
+
 func TestDefaultSettings(t *testing.T) {
 	s := defaultSettings()
 	if !s.CloseToTray {
