@@ -116,6 +116,7 @@ func (p *Player) Close() error {
 	if !p.closed {
 		p.pauseOffset = p.positionLocked()
 		p.closed = true
+		p.gen++
 		p.loading = false
 		p.playing = false
 		p.pendingPlay = false
@@ -555,7 +556,7 @@ func (p *Player) playCurrent() {
 		}
 
 		p.mu.Lock()
-		if gen != p.gen {
+		if p.closed || gen != p.gen {
 			p.mu.Unlock()
 			st.Close()
 			return
@@ -574,7 +575,7 @@ func (p *Player) playCurrent() {
 
 		p.post(func() {
 			p.mu.Lock()
-			if gen != p.gen {
+			if p.closed || gen != p.gen {
 				p.mu.Unlock()
 				st.Close()
 				out.Close()

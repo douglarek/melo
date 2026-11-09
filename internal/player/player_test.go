@@ -61,6 +61,26 @@ func TestCloseKeepsPosition(t *testing.T) {
 	}
 }
 
+func TestCloseInvalidatesPendingLoad(t *testing.T) {
+	p := newTestPlayer(t)
+	p.mu.Lock()
+	gen := p.gen
+	p.mu.Unlock()
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	p.mu.Lock()
+	closed, got := p.closed, p.gen
+	p.mu.Unlock()
+	if !closed {
+		t.Fatal("player was not closed")
+	}
+	if got <= gen {
+		t.Fatalf("generation = %d, want above %d so pending loads are dropped", got, gen)
+	}
+}
+
 func TestPlayerCloseCancelsLoad(t *testing.T) {
 	p := newTestPlayer(t)
 	started := make(chan struct{})
