@@ -47,6 +47,23 @@ func TestNavGestureLeavesShelvesAlone(t *testing.T) {
 	}
 }
 
+func TestReconcileQueue(t *testing.T) {
+	a := newTestApp(t)
+	a.pl.SetQueue([]ytmusic.Track{
+		{ID: "a", Title: "A", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+		{ID: "dead", Title: "粉红色的回忆", Artists: []ytmusic.ArtistRef{{Name: "韩宝仪"}}},
+		{ID: "b", Title: "B", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+	}, 1)
+	a.reconcileQueue(&ytmusic.Playlist{Tracks: []ytmusic.Track{
+		{ID: "a", Title: "A", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+		{ID: "b", Title: "B", Artists: []ytmusic.ArtistRef{{Name: "X"}}},
+		{ID: "new", Title: "粉红色的回忆", Artists: []ytmusic.ArtistRef{{Name: "韩宝仪"}}},
+	}})
+	if got := a.pl.Queue()[1].ID; got != "new" {
+		t.Fatalf("queue id = %s, want new", got)
+	}
+}
+
 func TestNavScrollGesture(t *testing.T) {
 	a := newTestApp(t)
 	a.homeSections = []ytmusic.Section{{}}
@@ -338,6 +355,7 @@ func TestBodyTextSelectionCopies(t *testing.T) {
 func TestTrackRowContextMenuCopies(t *testing.T) {
 	a := newTestApp(t)
 	a.open(route{page: pagePlaylist, id: "pl1"})
+	a.playlistRefreshing = map[string]bool{}
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -892,6 +910,7 @@ func TestSearchFlow(t *testing.T) {
 func TestPlaylistViewAndPlay(t *testing.T) {
 	a := newTestApp(t)
 	a.open(route{page: pagePlaylist, id: "pl1"})
+	a.playlistRefreshing = map[string]bool{}
 	tt := ui.NewTester(a.view, 1200, 800)
 	tt.Frame()
 
@@ -1731,7 +1750,10 @@ func TestRenderScenes(t *testing.T) {
 		},
 		{
 			name: "playlist",
-			prep: func(a *app) { a.open(route{page: pagePlaylist, id: "pl1"}) },
+			prep: func(a *app) {
+				a.open(route{page: pagePlaylist, id: "pl1"})
+				a.playlistRefreshing = map[string]bool{}
+			},
 			dark: true,
 		},
 		{

@@ -716,6 +716,13 @@ func (a *app) viewPlaylist(c *ui.Context) {
 		return
 	}
 	p := a.pal
+	if a.playlistRefreshing[a.route.id] {
+		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
+			ui.Spinner(c)
+			ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
+		})
+		return
+	}
 	pl := a.playlists[a.route.id]
 	if pl == nil {
 		ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {

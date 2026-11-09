@@ -381,6 +381,19 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 }
 
 // PlayTrack sets a single track as queue and plays it.
+// UpdateTracks replaces the queue's entries without moving the current
+// track or stopping playback, for tracks a playlist has refreshed.
+func (p *Player) UpdateTracks(tracks []ytmusic.Track) {
+	p.mu.Lock()
+	if len(tracks) != len(p.queue) {
+		p.mu.Unlock()
+		return
+	}
+	p.queue = append([]ytmusic.Track(nil), tracks...)
+	p.mu.Unlock()
+	p.changed()
+}
+
 func (p *Player) PlayTrack(track ytmusic.Track) {
 	p.SetQueue([]ytmusic.Track{track}, 0)
 }

@@ -142,10 +142,12 @@ type app struct {
 	trayErr  error
 	quitting bool
 
-	libraryPlaylists []ytmusic.PlaylistItem
-	libraryItems     []ytmusic.CardItem
-	libraryLoading   bool
-	libraryFilter    string
+	libraryPlaylists   []ytmusic.PlaylistItem
+	playlistRefreshing map[string]bool
+	playlistFilling    map[string]bool
+	libraryItems       []ytmusic.CardItem
+	libraryLoading     bool
+	libraryFilter      string
 
 	// Search UI
 	searchBox       ui.Handle
@@ -473,6 +475,50 @@ func (a *app) routeKey() string {
 	return fmt.Sprintf("%d-%s-%s-%s-%d", r.page, r.id, r.params, r.query, r.kind)
 }
 
+// reconcileQueue replaces queue entries a playlist no longer lists with the
+// playlist's current entry of the same song, as when a removed upload is
+// replaced. It leaves a queue that came from elsewhere alone.
+func (a *app) reconcileQueue(pl *ytmusic.Playlist) {
+	queue := a.pl.Queue()
+	if len(queue) == 0 {
+		return
+	}
+	inPlaylist := make(map[string]bool, len(pl.Tracks))
+	for _, t := range pl.Tracks {
+		inPlaylist[t.ID] = true
+	}
+	matched := 0
+	for _, t := range queue {
+		if inPlaylist[t.ID] {
+			matched++
+		}
+	}
+	if matched*2 < len(pl.Tracks) {
+		return
+	}
+	changed := false
+	for i, q := range queue {
+		if inPlaylist[q.ID] {
+			continue
+		}
+		for _, t := range pl.Tracks {
+			if t.ID != q.ID && sameSong(t, q) {
+				queue[i].ID = t.ID
+				changed = true
+				break
+			}
+		}
+	}
+	if changed {
+		a.pl.UpdateTracks(queue)
+	}
+}
+
+func sameSong(a, b ytmusic.Track) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Title), strings.TrimSpace(b.Title)) &&
+		strings.EqualFold(strings.TrimSpace(a.ArtistNames()), strings.TrimSpace(b.ArtistNames()))
+}
+
 func (a *app) loadCurrentRoute() {
 	ctx := context.Background()
 	switch a.route.page {
@@ -515,19 +561,51 @@ func (a *app) loadCurrentRoute() {
 		}
 	case pagePlaylist:
 		id := a.route.id
-		if isLikedPlaylistID(id) && a.profile == nil {
+		if isLikedPlaylistID(id) {
 			return
 		}
-		if a.playlists[id] == nil {
-			go func() {
-				pl, _ := ytmusic.DefaultClient.BrowsePlaylist(ctx, id)
-				a.post(func() {
-					if pl != nil {
-						a.playlists[id] = pl
-					}
-				})
-			}()
+		if a.playlistRefreshing == nil {
+			a.playlistRefreshing = map[string]bool{}
 		}
+		if a.playlistFilling == nil {
+			a.playlistFilling = map[string]bool{}
+		}
+		a.playlistRefreshing[id] = true
+		a.playlistFilling[id] = true
+		go func() {
+			pl, _ := ytmusic.DefaultClient.BrowsePlaylist(ctx, id)
+			hasMore := pl != nil && pl.Continuation != ""
+			a.post(func() {
+				a.playlistRefreshing[id] = false
+				if !hasMore {
+					a.playlistFilling[id] = false
+				}
+				if pl != nil {
+					a.playlists[id] = pl
+					a.reconcileQueue(pl)
+				}
+			})
+			if !hasMore {
+				return
+			}
+			for pl.Continuation != "" && len(pl.Tracks) < 1000 {
+				more, next, err := ytmusic.DefaultClient.PlaylistTracks(ctx, pl.Continuation)
+				if err != nil {
+					break
+				}
+				pl.Tracks = append(pl.Tracks, more...)
+				pl.Continuation = next
+				page := more
+				a.post(func() {
+					if p := a.playlists[id]; p != nil {
+						p.Tracks = appendUniqueTracks(p.Tracks, page)
+						p.Continuation = next
+					}
+					a.reconcileQueue(&ytmusic.Playlist{Tracks: page})
+				})
+			}
+			a.post(func() { a.playlistFilling[id] = false })
+		}()
 	case pageAlbum:
 		id := a.route.id
 		if a.albums[id] == nil {
@@ -811,7 +889,7 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 	}
 
 	pl := a.playlists[key]
-	if pl == nil || pl.Continuation == "" || a.loadingMore[key] {
+	if pl == nil || pl.Continuation == "" || a.loadingMore[key] || a.playlistFilling[key] {
 		return
 	}
 	loaded := len(pl.Tracks)
@@ -860,6 +938,7 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 					p.Continuation = ""
 				}
 			}
+			a.reconcileQueue(&ytmusic.Playlist{Tracks: tracks})
 			if key == "LM" {
 				before := len(a.liked)
 				a.liked = appendUniqueTracks(a.liked, tracks)
