@@ -1040,6 +1040,67 @@ func TestPodcastNameWithoutAShowSearchesPodcasts(t *testing.T) {
 	}
 }
 
+// The host of a podcast opens its channel, the page its episodes come from.
+func TestPodcastHostOpensItsChannel(t *testing.T) {
+	a := newTestApp(t)
+	a.playlists["MPSPPLshow"] = &ytmusic.Playlist{
+		ID: "MPSPPLshow", Title: "相声汇", Author: "德云茶舍", AuthorID: "UChost",
+		Podcast: true, TrackCount: 1,
+		Tracks: []ytmusic.Track{{ID: "ep1", Title: "第 1 期", Podcast: true}},
+	}
+	a.artists["UChost"] = &ytmusic.Artist{ID: "UChost", Name: "德云茶舍"}
+	a.route = route{page: pagePlaylist, id: "MPSPPLshow"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("主播：德云茶舍"); err != nil {
+		t.Fatalf("click the host: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageArtist || a.route.id != "UChost" {
+		t.Fatalf("the host opened %+v, want its channel", a.route)
+	}
+}
+
+// A channel page shows its carousels under the titles YouTube gave them, and
+// a show card opens the show.
+func TestChannelPageShowsItsCarousels(t *testing.T) {
+	a := newTestApp(t)
+	a.artists["UChost"] = &ytmusic.Artist{
+		ID:   "UChost",
+		Name: "德云茶舍",
+		Collections: []ytmusic.ArtistCollection{
+			{Title: "最新分集", Items: []ytmusic.CardItem{{
+				ID: "ep1", Title: "第 1 期", Type: "track",
+				Track: &ytmusic.Track{ID: "ep1", Title: "第 1 期", Podcast: true},
+			}}},
+			{Title: "播客", Items: []ytmusic.CardItem{{
+				ID: "MPSPPLshow", Title: "相声汇", Subtitle: "夕阳孤影", Type: "podcast",
+			}}},
+		},
+	}
+	a.playlists["MPSPPLshow"] = &ytmusic.Playlist{ID: "MPSPPLshow", Title: "相声汇", Podcast: true}
+	a.route = route{page: pageArtist, id: "UChost"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	for _, want := range []string{"最新分集", "播客", "第 1 期", "相声汇"} {
+		if !tt.HasText(want) {
+			t.Fatalf("channel page missing %q, texts: %v", want, tt.Texts())
+		}
+	}
+	if tt.HasText("单曲与迷你专辑") {
+		t.Fatal("a channel's carousels are still filed under singles")
+	}
+	if err := tt.Click("相声汇"); err != nil {
+		t.Fatalf("click the show card: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pagePlaylist || a.route.id != "MPSPPLshow" {
+		t.Fatalf("the show card opened %+v, want the show", a.route)
+	}
+}
+
 func TestActiveLyricLine(t *testing.T) {
 	lines := []ytmusic.LyricLine{
 		{TimeMs: 5000, Text: "一"},

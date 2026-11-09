@@ -794,7 +794,14 @@ func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmus
 				ui.Text(c, kind).FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, pl.Title).FontSize(28).Bold().TextColor(p.text)
 				if pl.Author != "" {
-					ui.Text(c, byline+pl.Author).FontSize(13).TextColor(p.muted)
+					name := byline + pl.Author
+					if pl.Podcast && pl.AuthorID != "" {
+						// The host's channel: the page the show's episodes
+						// come from.
+						a.link(c.Key("pl-author"), name, 13, p.muted, p.text, route{page: pageArtist, id: pl.AuthorID})
+					} else {
+						ui.Text(c, name).FontSize(13).TextColor(p.muted)
+					}
 				}
 				if pl.Description != "" {
 					ui.Text(c, pl.Description).FontSize(12).TextColor(p.faint).MaxLines(2).Tooltip(pl.Description)
@@ -910,7 +917,7 @@ func (a *app) viewArtist(c *ui.Context) {
 
 	hasAlbums := len(art.Albums) > 0
 	hasSingles := len(art.Singles) > 0
-	count := 1 + len(art.TopTracks)
+	count := 1 + len(art.TopTracks) + len(art.Collections)
 	if hasAlbums {
 		count++
 	}
@@ -939,7 +946,14 @@ func (a *app) viewArtist(c *ui.Context) {
 			idx--
 		}
 		if hasSingles {
-			a.artistSinglesSection(r.Context, art)
+			if idx == 0 {
+				a.artistSinglesSection(r.Context, art)
+				return
+			}
+			idx--
+		}
+		if idx >= 0 && idx < len(art.Collections) {
+			a.artistCollectionSection(r.Context, art, idx)
 		}
 	})
 }
@@ -987,6 +1001,13 @@ func (a *app) artistAlbumsSection(c *ui.Context, art *ytmusic.Artist) {
 		}
 	}
 	a.renderSection(c, "artist-albums-"+art.ID, ytmusic.Section{Title: locales.Albums(), Items: items})
+}
+
+// artistCollectionSection shows one of the page's other carousels under the
+// title it came with: a podcast host's shows, an artist's videos.
+func (a *app) artistCollectionSection(c *ui.Context, art *ytmusic.Artist, i int) {
+	col := art.Collections[i]
+	a.renderSection(c, fmt.Sprintf("artist-col-%s-%d", art.ID, i), ytmusic.Section{Title: col.Title, Items: col.Items})
 }
 
 func (a *app) artistSinglesSection(c *ui.Context, art *ytmusic.Artist) {
@@ -1305,7 +1326,7 @@ func (a *app) link(c *ui.Context, text string, size float32, color, hover ui.Col
 
 func albumCardType(typ string) string {
 	switch typ {
-	case "artist", "playlist", "track":
+	case "artist", "playlist", "track", "podcast":
 		return typ
 	default:
 		return "album"

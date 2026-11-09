@@ -370,6 +370,8 @@ func parseTwoRowItem(t map[string]any) CardItem {
 		itemType = "artist"
 	case strings.HasPrefix(browseID, "MPREb_") || pageType == "MUSIC_PAGE_TYPE_ALBUM":
 		itemType = "album"
+	case IsPodcastShowID(browseID):
+		itemType = "podcast"
 	case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL"):
 		itemType = "playlist"
 	case episode:
@@ -819,6 +821,7 @@ func parsePlaylistHeader(raw any, pl *Playlist) {
 		author = RunsToString(m["subtitle"])
 	}
 	pl.Author = author
+	pl.AuthorID = linkedChannelID(m["straplineTextOne"])
 
 	if count := playlistTrackCount(m); count > 0 {
 		pl.TrackCount = count
@@ -826,6 +829,21 @@ func parsePlaylistHeader(raw any, pl *Playlist) {
 
 	thumbs := extractThumbnail(m)
 	pl.Thumbnail = BestThumbnail(thumbs)
+}
+
+// linkedChannelID returns the channel a line of runs links to, or "" when it
+// names none: the creator of a playlist, the host of a podcast show.
+func linkedChannelID(raw any) string {
+	runs, _ := raw.(map[string]any)["runs"].([]any)
+	for _, rawRun := range runs {
+		run, _ := rawRun.(map[string]any)
+		nav, _ := run["navigationEndpoint"].(map[string]any)
+		be, _ := nav["browseEndpoint"].(map[string]any)
+		if id, _ := be["browseId"].(string); strings.HasPrefix(id, "UC") {
+			return id
+		}
+	}
+	return ""
 }
 
 var playlistCountRE = regexp.MustCompile(`(?i)([0-9][0-9,]*)\s*(?:首|songs?|tracks?)`)
@@ -1056,6 +1074,11 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 	var header map[string]any
 	if rootHeader, ok := root["header"].(map[string]any); ok {
 		header, _ = rootHeader["musicImmersiveHeaderRenderer"].(map[string]any)
+		if header == nil {
+			// A channel, as a podcast host's page is, names itself with the
+			// visual header instead.
+			header, _ = rootHeader["musicVisualHeaderRenderer"].(map[string]any)
+		}
 	}
 	if header != nil {
 		art.Name = RunsToString(header["title"])
@@ -1100,7 +1123,7 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 					art.SongsID, art.SongsParams = moreEndpoint(shelf)
 				}
 			}
-			// MusicCarouselShelfRenderer (Albums, Singles)
+			// MusicCarouselShelfRenderer (Albums, Singles, or a channel's own)
 			if car, ok := sm["musicCarouselShelfRenderer"].(map[string]any); ok {
 				var carHeader map[string]any
 				if h, ok := car["header"].(map[string]any); ok {
@@ -1108,6 +1131,18 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 				}
 				title := RunsToString(carHeader["title"])
 				items, _ := car["contents"].([]any)
+				albums := strings.Contains(title, "专辑") || strings.Contains(title, "Albums")
+				singles := strings.Contains(title, "单曲") || strings.Contains(title, "Singles")
+				if !albums && !singles {
+					// The page's other carousels say what they hold — a
+					// channel's shows and latest episodes, an artist's videos
+					// and playlists — so keep their titles instead of filing
+					// them under singles.
+					if col := collectionShelf(title, items); col != nil {
+						art.Collections = append(art.Collections, *col)
+					}
+					continue
+				}
 				for _, item := range items {
 					im, _ := item.(map[string]any)
 					twoRow, _ := im["musicTwoRowItemRenderer"].(map[string]any)
@@ -1125,15 +1160,15 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 						Track:     ci.Track,
 					}
 					switch ai.Type {
-					case "album", "artist", "playlist", "track":
+					case "album", "artist", "playlist", "track", "podcast":
 					default:
-						if strings.Contains(title, "专辑") || strings.Contains(title, "Albums") {
+						if albums {
 							ai.Type = "Album"
 						} else {
 							ai.Type = "Single"
 						}
 					}
-					if strings.Contains(title, "专辑") || strings.Contains(title, "Albums") {
+					if albums {
 						art.Albums = append(art.Albums, ai)
 					} else {
 						art.Singles = append(art.Singles, ai)
@@ -1144,6 +1179,40 @@ func (c *Client) BrowseArtist(ctx context.Context, artistID string) (*Artist, er
 	}
 
 	return art, nil
+}
+
+// collectionShelf parses a carousel whose items are of either kind: a channel
+// lists its shows as two-row cards and its latest episodes as rows.
+func collectionShelf(title string, items []any) *ArtistCollection {
+	col := ArtistCollection{Title: title}
+	for _, item := range items {
+		im, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if twoRow, ok := im["musicTwoRowItemRenderer"].(map[string]any); ok {
+			col.Items = append(col.Items, parseTwoRowItem(twoRow))
+			continue
+		}
+		if row, ok := im["musicMultiRowListItemRenderer"].(map[string]any); ok {
+			track := parseMultiRowTrack(row)
+			if track.ID == "" {
+				continue
+			}
+			col.Items = append(col.Items, CardItem{
+				ID:        track.ID,
+				Title:     track.Title,
+				Subtitle:  RunsToString(row["secondTitle"]),
+				Thumbnail: track.Thumbnail,
+				Type:      "track",
+				Track:     &track,
+			})
+		}
+	}
+	if len(col.Items) == 0 {
+		return nil
+	}
+	return &col
 }
 
 // BrowseArtistSongs loads the complete song list an artist page's songs shelf

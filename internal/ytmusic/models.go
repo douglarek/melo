@@ -198,6 +198,8 @@ type Playlist struct {
 	Continuation string  `json:"continuation,omitempty"`
 	// Podcast marks a page that lists a show's episodes rather than songs.
 	Podcast bool `json:"podcast,omitempty"`
+	// AuthorID is the page the author or host links to, when it names one.
+	AuthorID string `json:"authorId,omitempty"`
 }
 
 // AlbumItem represents an album summary.
@@ -238,6 +240,17 @@ type Artist struct {
 	// empty when the artist page has no such shelf.
 	SongsID     string `json:"songsId,omitempty"`
 	SongsParams string `json:"songsParams,omitempty"`
+	// Collections are the page's remaining carousels under their own titles:
+	// a podcast host's shows and latest episodes, an artist's videos and
+	// playlists.
+	Collections []ArtistCollection `json:"collections,omitempty"`
+}
+
+// ArtistCollection is a carousel of an artist or channel page whose title says
+// what it holds.
+type ArtistCollection struct {
+	Title string     `json:"title"`
+	Items []CardItem `json:"items"`
 }
 
 // SearchResult groups results by category.

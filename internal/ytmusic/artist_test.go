@@ -218,3 +218,84 @@ func TestBrowseArtistHandlesMissingHeaderAndTitles(t *testing.T) {
 		t.Fatalf("songs endpoint = %q %q, want empty without a more button", art.SongsID, art.SongsParams)
 	}
 }
+
+// channelPageJSON is a podcast host's page: the visual header names the
+// channel, and its carousels list the shows it hosts and their latest
+// episodes.
+const channelPageJSON = `{
+	"header": {"musicVisualHeaderRenderer": {
+		"title": {"runs": [{"text": "德云茶舍"}]},
+		"subscriptionButton": {"subscribeButtonRenderer": {"subscriberCountText": {"runs": [{"text": "1.2万"}]}}},
+		"thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
+			{"url": "https://example/channel.jpg", "width": 540, "height": 225}
+		]}}}
+	}},
+	"contents": {
+		"singleColumnBrowseResultsRenderer": {
+			"tabs": [{
+				"tabRenderer": {
+					"content": {
+						"sectionListRenderer": {
+							"contents": [
+								{"musicCarouselShelfRenderer": {
+									"header": {"musicCarouselShelfBasicHeaderRenderer": {"title": {"runs": [{"text": "最新分集"}]}}},
+									"contents": [{"musicMultiRowListItemRenderer": {
+										"title": {"runs": [{"text": "第 1 期"}]},
+										"secondTitle": {"runs": [{"text": "相声汇"}]},
+										"onTap": {"watchEndpoint": {"videoId": "ep1",
+											"watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"}}}}
+									}}]
+								}},
+								{"musicCarouselShelfRenderer": {
+									"header": {"musicCarouselShelfBasicHeaderRenderer": {"title": {"runs": [{"text": "播客"}]}}},
+									"contents": [{"musicTwoRowItemRenderer": {
+										"title": {"runs": [{"text": "相声汇"}]},
+										"subtitle": {"runs": [{"text": "夕阳孤影"}]},
+										"navigationEndpoint": {"browseEndpoint": {
+											"browseId": "MPSPPLshow",
+											"browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"}}
+										}}
+									}}]
+								}}
+							]
+						}
+					}
+				}
+			}]
+		}
+	}
+}`
+
+// A channel page names itself with the visual header, and its carousels keep
+// the titles they came with instead of being filed under singles.
+func TestBrowseArtistReadsAChannelPage(t *testing.T) {
+	c := NewClient()
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(channelPageJSON)),
+		}, nil
+	})}
+
+	art, err := c.BrowseArtist(context.Background(), "UChost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Name != "德云茶舍" || art.Subscribers != "1.2万" {
+		t.Fatalf("channel = %q (%s)", art.Name, art.Subscribers)
+	}
+	if len(art.Singles) != 0 || len(art.Albums) != 0 {
+		t.Fatalf("channel carousels were filed as albums or singles: %+v", art)
+	}
+	if len(art.Collections) != 2 {
+		t.Fatalf("collections = %+v", art.Collections)
+	}
+	latest, shows := art.Collections[0], art.Collections[1]
+	if latest.Title != "最新分集" || len(latest.Items) != 1 || latest.Items[0].ID != "ep1" || !latest.Items[0].Track.Podcast {
+		t.Fatalf("latest episodes = %+v", latest)
+	}
+	if shows.Title != "播客" || len(shows.Items) != 1 || shows.Items[0].ID != "MPSPPLshow" || shows.Items[0].Type != "podcast" {
+		t.Fatalf("shows = %+v", shows)
+	}
+}
