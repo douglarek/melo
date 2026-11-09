@@ -196,6 +196,8 @@ type Playlist struct {
 	TrackCount   int     `json:"trackCount"`
 	Tracks       []Track `json:"tracks"`
 	Continuation string  `json:"continuation,omitempty"`
+	// Podcast marks a page that lists a show's episodes rather than songs.
+	Podcast bool `json:"podcast,omitempty"`
 }
 
 // AlbumItem represents an album summary.

@@ -174,7 +174,7 @@ func parseCardShelf(card map[string]any, res *SearchResult) {
 			}
 		}
 		switch {
-		case strings.HasPrefix(browseID, "MPSPPL") || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
+		case IsPodcastShowID(browseID) || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
 			res.Podcasts = append(res.Podcasts, CardItem{ID: browseID, Title: title, Subtitle: subtitle, Thumbnail: thumbURL, Type: "podcast"})
 		case strings.HasPrefix(browseID, "UC") || pageType == "MUSIC_PAGE_TYPE_ARTIST":
 			res.Artists = append(res.Artists, ArtistRef{ID: browseID, Name: title, Thumbnail: thumbURL})
@@ -287,7 +287,7 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 		res.Albums = append(res.Albums, AlbumItem{ID: browseID, Title: title, Artist: subtitle, Thumbnail: thumbURL})
 	case strings.HasPrefix(browseID, "VL") || strings.HasPrefix(browseID, "PL") || pageType == "MUSIC_PAGE_TYPE_PLAYLIST":
 		res.Playlists = append(res.Playlists, PlaylistItem{ID: browseID, Title: title, Author: subtitle, Thumbnail: thumbURL})
-	case strings.HasPrefix(browseID, "MPSPPL") || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
+	case IsPodcastShowID(browseID) || pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE":
 		res.Podcasts = append(res.Podcasts, CardItem{ID: browseID, Title: title, Subtitle: subtitle, Thumbnail: thumbURL, Type: "podcast"})
 	case videoID != "":
 		res.Tracks = append(res.Tracks, Track{

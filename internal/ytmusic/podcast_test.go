@@ -1,8 +1,12 @@
 package ytmusic
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +97,135 @@ func TestPodcastStreamRefusesWhatIsNotAnEnclosure(t *testing.T) {
 		if _, err := podcastStream("episode", resp); !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("podcastStream(%s) = %v, want ErrUnavailable", raw, err)
 		}
+	}
+}
+
+// podcastShowPageJSON is a show's page: the header names the show and its
+// channel, and the shelf lists episodes, which are RSS hosted.
+const podcastShowPageJSON = `{
+	"contents": {
+		"twoColumnBrowseResultsRenderer": {
+			"tabs": [{
+				"tabRenderer": {
+					"content": {
+						"sectionListRenderer": {
+							"contents": [{
+								"musicResponsiveHeaderRenderer": {
+									"title": {"runs": [{"text": "相声汇"}]},
+									"straplineTextOne": {"runs": [{"text": "夕阳孤影"}]},
+									"thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
+										{"url": "https://example/show.jpg", "width": 400, "height": 400}
+									]}}}
+								}
+							}]
+						}
+					}
+				}
+			}],
+			"secondaryContents": {
+				"sectionListRenderer": {
+					"contents": [{
+						"musicShelfRenderer": {
+							"contents": [{
+								"musicMultiRowListItemRenderer": {
+									"title": {"runs": [{"text": "《生活.COM》"}]},
+									"secondTitle": {"runs": [{"text": "相声汇"}]},
+									"playbackProgress": {"musicPlaybackProgressRenderer": {"durationText": {"runs": [{"text": "35:00"}]}}},
+									"onTap": {"watchEndpoint": {
+										"videoId": "episode1",
+										"watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {
+											"musicVideoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"
+										}}
+									}}
+								}
+							}]
+						}
+					}]
+				}
+			}
+		}
+	}
+}`
+
+func browsePlaylistWith(t *testing.T, raw string) *Playlist {
+	t.Helper()
+	c := NewClient()
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(raw)),
+		}, nil
+	})}
+	pl, err := c.BrowsePlaylist(context.Background(), "MPSPPLshow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pl
+}
+
+// A show's page is browsed like a playlist, but its rows are episodes: the
+// page must know it is a podcast, not a playlist of songs.
+func TestBrowsePlaylistMarksAShowAsAPodcast(t *testing.T) {
+	pl := browsePlaylistWith(t, podcastShowPageJSON)
+	if !pl.Podcast {
+		t.Fatalf("a show's page came back as a playlist: %+v", pl)
+	}
+	if pl.Title != "相声汇" || pl.Author != "夕阳孤影" {
+		t.Fatalf("show = %q by %q", pl.Title, pl.Author)
+	}
+	if len(pl.Tracks) != 1 || pl.Tracks[0].ID != "episode1" || !pl.Tracks[0].Podcast {
+		t.Fatalf("episodes = %+v", pl.Tracks)
+	}
+}
+
+// podcastPlaylistJSON is a playlist, not a show's page, whose rows are
+// episodes all the same.
+const podcastPlaylistJSON = `{
+	"contents": {
+		"singleColumnBrowseResultsRenderer": {
+			"tabs": [{
+				"tabRenderer": {
+					"content": {
+						"sectionListRenderer": {
+							"contents": [{
+								"musicPlaylistShelfRenderer": {
+									"contents": [{
+										"musicMultiRowListItemRenderer": {
+											"title": {"runs": [{"text": "第 1 期"}]},
+											"onTap": {"watchEndpoint": {
+												"videoId": "ep",
+												"watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {
+													"musicVideoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"
+												}}
+											}}
+										}
+									}]
+								}
+							}]
+						}
+					}
+				}
+			}]
+		}
+	}
+}`
+
+// A playlist that holds episodes is a podcast to listen to as well.
+func TestBrowsePlaylistMarksEpisodesAsAPodcast(t *testing.T) {
+	c := NewClient()
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(podcastPlaylistJSON)),
+		}, nil
+	})}
+	pl, err := c.BrowsePlaylist(context.Background(), "VLPLepisodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pl.Podcast {
+		t.Fatalf("a playlist of episodes came back as songs: %+v", pl)
 	}
 }

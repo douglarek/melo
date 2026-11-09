@@ -750,9 +750,13 @@ func (a *app) viewPlaylist(c *ui.Context) {
 // playlistLoading fills the page while its playlist is on its way.
 func (a *app) playlistLoading(c *ui.Context) {
 	p := a.pal
+	loading := locales.LoadingThePlaylist()
+	if ytmusic.IsPodcastShowID(a.route.id) {
+		loading = locales.LoadingThePodcast()
+	}
 	ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Gap(12).Children(func() {
 		ui.Spinner(c)
-		ui.Text(c, locales.LoadingThePlaylist()).FontSize(14).TextColor(p.muted)
+		ui.Text(c, loading).FontSize(14).TextColor(p.muted)
 	})
 }
 
@@ -778,14 +782,19 @@ func (a *app) playlistTrackList(c *ui.Context, pl *ytmusic.Playlist, tracks []yt
 
 func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmusic.Track) {
 	p := a.pal
+	// A show's page lists episodes, not songs: name it and count them so.
+	kind, byline, playAll := locales.Playlists(), locales.CreatedByPrefix(), locales.PlayAllCount()
+	if pl.Podcast {
+		kind, byline, playAll = locales.Podcasts(), locales.HostedByPrefix(), locales.PlayAllEpisodes()
+	}
 	ui.Column(c).FillWidth().Padding(0, 0, 24, 0).Children(func() {
 		ui.Row(c).FillWidth().Gap(24).AlignItems(ui.End).Children(func() {
 			a.playlistCover(c, pl, 160, 12)
 			ui.Column(c).Grow(1).Gap(8).Children(func() {
-				ui.Text(c, locales.Playlists()).FontSize(12).Bold().TextColor(p.accent)
+				ui.Text(c, kind).FontSize(12).Bold().TextColor(p.accent)
 				ui.Text(c, pl.Title).FontSize(28).Bold().TextColor(p.text)
 				if pl.Author != "" {
-					ui.Text(c, locales.CreatedByPrefix()+pl.Author).FontSize(13).TextColor(p.muted)
+					ui.Text(c, byline+pl.Author).FontSize(13).TextColor(p.muted)
 				}
 				if pl.Description != "" {
 					ui.Text(c, pl.Description).FontSize(12).TextColor(p.faint).MaxLines(2).Tooltip(pl.Description)
@@ -802,7 +811,7 @@ func (a *app) playlistHeader(c *ui.Context, pl *ytmusic.Playlist, tracks []ytmus
 					if total < len(tracks) {
 						total = len(tracks)
 					}
-					ui.Text(c, fmt.Sprintf(locales.PlayAllCount(), total)).FontSize(13).Bold().TextColor(p.onAccent)
+					ui.Text(c, fmt.Sprintf(playAll, total)).FontSize(13).Bold().TextColor(p.onAccent)
 				})
 			})
 		})

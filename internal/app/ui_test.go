@@ -948,6 +948,49 @@ func TestPlaylistViewAndPlay(t *testing.T) {
 	}
 }
 
+// A show's page lists episodes, and says so: a podcast is not a playlist of
+// songs, and its count is of episodes.
+func TestPodcastPageSaysPodcast(t *testing.T) {
+	a := newTestApp(t)
+	a.playlists["MPSPPLshow"] = &ytmusic.Playlist{
+		ID:         "MPSPPLshow",
+		Title:      "相声汇",
+		Author:     "夕阳孤影",
+		Podcast:    true,
+		TrackCount: 1,
+		Tracks: []ytmusic.Track{{
+			ID:         "episode1",
+			Title:      "《生活.COM》",
+			Podcast:    true,
+			Artists:    []ytmusic.ArtistRef{{Name: "相声汇"}},
+			DurationMs: 2100000,
+		}},
+	}
+	a.route = route{page: pagePlaylist, id: "MPSPPLshow"}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	for _, want := range []string{"播客", "主播：夕阳孤影", "播放全部 (1 集)"} {
+		if !tt.HasText(want) {
+			t.Fatalf("podcast page missing %q, texts: %v", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"创建者：", "播放全部 (1 首)"} {
+		if tt.HasText(unwanted) {
+			t.Fatalf("podcast page still says %q", unwanted)
+		}
+	}
+
+	// While it loads, the page names what it waits for just as well.
+	loading := newTestApp(t)
+	loading.route = route{page: pagePlaylist, id: "MPSPPLshow"}
+	lt := ui.NewTester(loading.view, 1200, 900)
+	lt.Frame()
+	if !lt.HasText("正在加载播客...") {
+		t.Fatalf("a show's page loads like a playlist, texts: %v", lt.Texts())
+	}
+}
+
 func TestActiveLyricLine(t *testing.T) {
 	lines := []ytmusic.LyricLine{
 		{TimeMs: 5000, Text: "一"},

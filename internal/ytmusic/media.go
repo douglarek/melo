@@ -12,6 +12,13 @@ func podcastEpisodeID(browseID string) (string, bool) {
 	return videoID, true
 }
 
+// IsPodcastShowID reports whether a browse ID names a podcast show, whose page
+// lists episodes rather than songs: YouTube Music writes those as
+// MPSPPL<show>.
+func IsPodcastShowID(browseID string) bool {
+	return strings.HasPrefix(browseID, "MPSPPL")
+}
+
 // itemHasMusicVideo reports whether any navigation endpoint in an item points
 // at a music video. YouTube Music puts musicVideoType on the item endpoint,
 // the title runs, or the play overlay depending on the renderer, so all three

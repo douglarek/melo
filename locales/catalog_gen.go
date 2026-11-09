@@ -534,6 +534,16 @@ func (msgs Messages) Home() string {
 	return Catalog.Format(msgs.locale, "home", nil)
 }
 
+// HostedByPrefix says "主播："
+// in the language the app shows.
+func HostedByPrefix() string { return In(i18n.Locale()).HostedByPrefix() }
+
+// HostedByPrefix says "主播："
+// in the language of msgs.
+func (msgs Messages) HostedByPrefix() string {
+	return Catalog.Format(msgs.locale, "hostedByPrefix", nil)
+}
+
 // IsAvailableSuffix says " 可以更新"
 // in the language the app shows.
 func IsAvailableSuffix() string { return In(i18n.Locale()).IsAvailableSuffix() }
@@ -772,6 +782,16 @@ func LoadingThePlaylist() string { return In(i18n.Locale()).LoadingThePlaylist()
 // in the language of msgs.
 func (msgs Messages) LoadingThePlaylist() string {
 	return Catalog.Format(msgs.locale, "loadingThePlaylist", nil)
+}
+
+// LoadingThePodcast says "正在加载播客..."
+// in the language the app shows.
+func LoadingThePodcast() string { return In(i18n.Locale()).LoadingThePodcast() }
+
+// LoadingThePodcast says "正在加载播客..."
+// in the language of msgs.
+func (msgs Messages) LoadingThePodcast() string {
+	return Catalog.Format(msgs.locale, "loadingThePodcast", nil)
 }
 
 // Lyrics says "歌词"
@@ -1202,6 +1222,16 @@ func PlayAllCount() string { return In(i18n.Locale()).PlayAllCount() }
 // in the language of msgs.
 func (msgs Messages) PlayAllCount() string {
 	return Catalog.Format(msgs.locale, "playAllCount", nil)
+}
+
+// PlayAllEpisodes says "播放全部 (%d 集)"
+// in the language the app shows.
+func PlayAllEpisodes() string { return In(i18n.Locale()).PlayAllEpisodes() }
+
+// PlayAllEpisodes says "播放全部 (%d 集)"
+// in the language of msgs.
+func (msgs Messages) PlayAllEpisodes() string {
+	return Catalog.Format(msgs.locale, "playAllEpisodes", nil)
 }
 
 // PlayPause says "播放/暂停"

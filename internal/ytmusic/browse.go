@@ -606,6 +606,15 @@ func (c *Client) BrowsePlaylist(ctx context.Context, playlistID string) (*Playli
 	if pl.TrackCount == 0 {
 		pl.TrackCount = len(pl.Tracks)
 	}
+	// A show's page is browsed as a playlist, but it lists episodes. Say so,
+	// and treat a playlist that holds episodes the same way.
+	pl.Podcast = IsPodcastShowID(browseID)
+	for _, t := range pl.Tracks {
+		if t.Podcast {
+			pl.Podcast = true
+			break
+		}
+	}
 
 	return pl, nil
 }
@@ -1459,7 +1468,7 @@ func (c *Client) BrowseLibrary(ctx context.Context) ([]CardItem, error) {
 		if card.ID == "" || card.Title == "" || seen[card.ID] {
 			continue
 		}
-		if strings.HasPrefix(card.ID, "MPSPPL") || strings.HasPrefix(card.Subtitle, "播客") {
+		if IsPodcastShowID(card.ID) || strings.HasPrefix(card.Subtitle, "播客") {
 			card.Type = "podcast"
 		}
 		seen[card.ID] = true
