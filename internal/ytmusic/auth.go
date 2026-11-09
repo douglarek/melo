@@ -154,16 +154,18 @@ func LoadSession() (*SessionData, error) {
 		return nil, err
 	}
 
-	if secret, err := sessionSecretGet(); err == nil && len(secret) > 0 {
-		sess.Cookie = string(secret)
-	} else if sess.Cookie != "" && len(sess.Cookie) <= mygo.MaxSecretSize {
-		if err := sessionSecretSet([]byte(sess.Cookie)); err == nil {
-			stripped := cloneSession(&sess)
-			stripped.Cookie = ""
-			if b, err := json.Marshal(stripped); err == nil {
-				_ = writeSessionBytes(b)
+	if sess.Cookie != "" {
+		if len(sess.Cookie) <= mygo.MaxSecretSize {
+			if err := sessionSecretSet([]byte(sess.Cookie)); err == nil {
+				stripped := cloneSession(&sess)
+				stripped.Cookie = ""
+				if b, err := json.Marshal(stripped); err == nil {
+					_ = writeSessionBytes(b)
+				}
 			}
 		}
+	} else if secret, err := sessionSecretGet(); err == nil && len(secret) > 0 {
+		sess.Cookie = string(secret)
 	}
 	if sess.Cookie == "" {
 		return nil, errors.New("no saved session")
