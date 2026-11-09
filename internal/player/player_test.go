@@ -61,6 +61,29 @@ func TestCloseKeepsPosition(t *testing.T) {
 	}
 }
 
+func TestTakePendingSeek(t *testing.T) {
+	p := newTestPlayer(t)
+	p.mu.Lock()
+	p.resumeAt = 30 * time.Second
+	p.resumeID = "v1"
+	pos, ok := p.takePendingSeekLocked("v1")
+	moved := p.resumeID
+	p.mu.Unlock()
+	if !ok || pos != 30*time.Second {
+		t.Fatalf("pending seek = %v/%v, want 30s/true", pos, ok)
+	}
+	if moved != "" {
+		t.Fatalf("pending seek was not cleared: %q", moved)
+	}
+
+	p.mu.Lock()
+	pos, ok = p.takePendingSeekLocked("v1")
+	p.mu.Unlock()
+	if ok || pos != 0 {
+		t.Fatalf("second take = %v/%v, want 0/false", pos, ok)
+	}
+}
+
 func TestCloseInvalidatesPendingLoad(t *testing.T) {
 	p := newTestPlayer(t)
 	p.mu.Lock()

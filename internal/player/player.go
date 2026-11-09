@@ -581,6 +581,10 @@ func (p *Player) playCurrent() {
 				out.Close()
 				return
 			}
+			if pos, ok := p.takePendingSeekLocked(track.ID); ok {
+				out.Seek(pos)
+				p.pauseOffset = pos
+			}
 			p.stream = st
 			p.out = out
 			p.info = info
@@ -603,6 +607,17 @@ func (p *Player) playCurrent() {
 	})
 	p.mu.Unlock()
 	p.changed()
+}
+
+// takePendingSeekLocked returns a seek made while the stream loaded, and
+// clears it. The caller holds p.mu.
+func (p *Player) takePendingSeekLocked(trackID string) (time.Duration, bool) {
+	if p.resumeID != trackID {
+		return 0, false
+	}
+	pos := p.resumeAt
+	p.resumeAt, p.resumeID = 0, ""
+	return pos, true
 }
 
 // failLoad reports a track whose stream did not resolve. A track YouTube will
