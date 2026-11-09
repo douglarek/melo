@@ -21,6 +21,18 @@ import (
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
+func TestHLSSkipFrames(t *testing.T) {
+	if got := hlsSkipFrames(5000, 2000, 44100); got != 132300 {
+		t.Fatalf("skip = %d, want 132300", got)
+	}
+	if got := hlsSkipFrames(2000, 2000, 44100); got != 0 {
+		t.Fatalf("skip at segment start = %d, want 0", got)
+	}
+	if got := hlsSkipFrames(1000, 2000, 44100); got != 0 {
+		t.Fatalf("skip before segment start = %d, want 0", got)
+	}
+}
+
 func TestOpenStreamingMP4CleansUpAfterHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gone", http.StatusNotFound)

@@ -410,12 +410,27 @@ func (s *hlsStream) seekSegments(frame int64, sampleRate int, segments []ytmusic
 	if err != nil {
 		return err
 	}
+	if skipFrames := hlsSkipFrames(targetMs, accumulatedMs, sampleRate); skipFrames > 0 {
+		skipBytes := skipFrames * int64(max(1, s.channels)) * 2
+		if _, err := io.CopyN(io.Discard, dec, skipBytes); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+	}
 	s.decReader = sr
 	s.decoder = dec
 	s.mu.Lock()
 	s.curFrame = frame
 	s.mu.Unlock()
 	return nil
+}
+
+// hlsSkipFrames is how many frames to discard from a segment that started
+// before the target.
+func hlsSkipFrames(targetMs, segmentStartMs int64, sampleRate int) int64 {
+	if targetMs <= segmentStartMs || sampleRate <= 0 {
+		return 0
+	}
+	return (targetMs - segmentStartMs) * int64(sampleRate) / 1000
 }
 
 func (s *hlsStream) Close() error {
