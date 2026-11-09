@@ -206,6 +206,7 @@ func (c *artCache) evictArtLocked() {
 		}
 		c.artBytes -= c.art[oldestKey].size
 		delete(c.art, oldestKey)
+		delete(c.colors, oldestKey)
 	}
 	if c.artBytes < 0 {
 		c.artBytes = 0

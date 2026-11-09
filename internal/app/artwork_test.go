@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func TestArtCacheCoalescesPosts(t *testing.T) {
@@ -48,6 +50,9 @@ func TestArtCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	c.art["old"] = &artwork{size: 1, lastUsed: now.Add(-3 * time.Second)}
 	c.art["mid"] = &artwork{size: 1, lastUsed: now.Add(-2 * time.Second)}
 	c.art["new"] = &artwork{size: 1, lastUsed: now.Add(-time.Second)}
+	c.colors["old"] = ui.RGBA(1, 2, 3, 1)
+	c.colors["mid"] = ui.RGBA(4, 5, 6, 1)
+	c.colors["new"] = ui.RGBA(7, 8, 9, 1)
 	c.artBytes = 3
 	c.evictArtLocked()
 
@@ -56,6 +61,12 @@ func TestArtCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if _, ok := c.art["old"]; ok {
 		t.Fatal("oldest artwork was not evicted")
+	}
+	if _, ok := c.colors["old"]; ok {
+		t.Fatal("oldest artwork color was not evicted")
+	}
+	if _, ok := c.colors["new"]; !ok {
+		t.Fatal("newest artwork color was evicted")
 	}
 }
 
