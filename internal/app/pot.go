@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,17 +42,60 @@ type Pot struct {
 	client *http.Client
 }
 
+// potHosts are the origins the token page may reach through Fetch.
+var potHosts = map[string]bool{
+	"www.youtube.com":       true,
+	"jnn-pa.googleapis.com": true,
+}
+
+func checkPotURL(u *url.URL) error {
+	if u == nil || u.Scheme != "https" {
+		return errors.New("pot: fetch needs an https url")
+	}
+	if u.User != nil {
+		return errors.New("pot: fetch url must not carry a user")
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return errors.New("pot: fetch url must use the default port")
+	}
+	if !potHosts[strings.ToLower(u.Hostname())] {
+		return errors.New("pot: fetch host is not allowed")
+	}
+	return nil
+}
+
+// newPotClient is the HTTP client of the token page, which follows redirects
+// only within the allowed hosts.
+func newPotClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return checkPotURL(req.URL)
+		},
+	}
+}
+
 // Fetch performs an HTTP request for the token page.
 func (p *Pot) Fetch(ctx context.Context, req PotFetchRequest) (PotFetchResponse, error) {
 	method := req.Method
 	if method == "" {
 		method = http.MethodGet
 	}
+	if method != http.MethodGet && method != http.MethodPost {
+		return PotFetchResponse{}, errors.New("pot: fetch method is not allowed")
+	}
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return PotFetchResponse{}, err
+	}
+	if err := checkPotURL(u); err != nil {
+		return PotFetchResponse{}, err
+	}
 	var body io.Reader
 	if req.Body != "" {
 		body = strings.NewReader(req.Body)
 	}
-	r, err := http.NewRequestWithContext(ctx, method, req.URL, body)
+	r, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return PotFetchResponse{}, err
 	}
@@ -66,7 +110,7 @@ func (p *Pot) Fetch(ctx context.Context, req PotFetchRequest) (PotFetchResponse,
 		return PotFetchResponse{}, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return PotFetchResponse{}, err
 	}

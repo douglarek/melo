@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -185,7 +184,7 @@ func (a *app) post(fn func()) {
 // Run boots the application and launches the main window.
 func Run() error {
 	useUpdatePlugin()
-	mygo.Bind(&Pot{client: &http.Client{Timeout: 30 * time.Second}})
+	mygo.Bind(&Pot{client: newPotClient()})
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{
 		ctx:         ctx,
