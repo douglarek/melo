@@ -1581,8 +1581,8 @@ func TestNowPlayingRelatedTab(t *testing.T) {
 	}
 }
 
-// A podcast episode has no lyrics tab, and no lyrics button in the player
-// bar: YouTube has none for it, and the pane would show nothing.
+// A podcast episode has the queue alone: no lyrics, and no related shelf —
+// YouTube keeps the related page of the shows it comes from empty.
 func TestPodcastNowPlayingHasNoLyricsTab(t *testing.T) {
 	a := newTestApp(t)
 	a.pl.SetQueue([]ytmusic.Track{{ID: "ep1", Title: "第 1 期", Podcast: true, Artists: []ytmusic.ArtistRef{{Name: "相声汇"}}, DurationMs: 2100000}}, 0)
@@ -1590,13 +1590,13 @@ func TestPodcastNowPlayingHasNoLyricsTab(t *testing.T) {
 
 	tt := ui.NewTester(a.view, 1600, 1000)
 	tt.Frame()
-	if tt.HasText("歌词") {
-		t.Fatalf("a podcast offers a lyrics tab, texts: %v", tt.Texts())
-	}
-	for _, want := range []string{"待播清单", "相关推荐"} {
-		if !tt.HasText(want) {
-			t.Fatalf("podcast tabs are missing %q", want)
+	for _, unwanted := range []string{"歌词", "相关推荐"} {
+		if tt.HasText(unwanted) {
+			t.Fatalf("a podcast offers a %q tab, texts: %v", unwanted, tt.Texts())
 		}
+	}
+	if !tt.HasText("待播清单") {
+		t.Fatalf("podcast tabs are missing 待播清单")
 	}
 
 	closed := newTestApp(t)
@@ -1608,33 +1608,24 @@ func TestPodcastNowPlayingHasNoLyricsTab(t *testing.T) {
 	}
 }
 
-// A podcast's related page lists episodes and shows; its pane shows both.
-func TestPodcastRelatedPaneListsEpisodes(t *testing.T) {
+// The one tab a podcast has lists its queue, the episode playing included.
+func TestPodcastQueueTabShowsTheQueue(t *testing.T) {
 	a := newTestApp(t)
-	current := ytmusic.Track{ID: "ep0", Title: "第 0 期", Podcast: true, DurationMs: 2000000}
-	a.pl.SetQueue([]ytmusic.Track{current}, 0)
-	ep := ytmusic.Track{ID: "ep9", Title: "另一段相声", Podcast: true}
-	a.relatedSections = []ytmusic.Section{
-		{Title: "你可能还喜欢", Items: []ytmusic.CardItem{{ID: ep.ID, Title: ep.Title, Type: "track", Track: &ep}}},
-		{Title: "推荐的播客", Items: []ytmusic.CardItem{{ID: "MPSPPLother", Title: "别家相声", Type: "podcast"}}},
-	}
-	a.relatedVideoID = current.ID
-	a.relatedLoaded = true
+	a.pl.SetQueue([]ytmusic.Track{
+		{ID: "ep1", Title: "第一段", Podcast: true, DurationMs: 2100000},
+		{ID: "ep2", Title: "第二段", Podcast: true, DurationMs: 1900000},
+	}, 0)
 	a.nowPlayingOpen = true
-	a.npPane = paneRelated
 
 	tt := ui.NewTester(a.view, 1600, 1000)
 	tt.Frame()
-	for _, want := range []string{"你可能还喜欢", "另一段相声", "推荐的播客", "别家相声"} {
+	for _, want := range []string{"第一段", "第二段"} {
 		if !tt.HasText(want) {
-			t.Fatalf("related pane is missing %q, texts: %v", want, tt.Texts())
+			t.Fatalf("the queue is missing %q, texts: %v", want, tt.Texts())
 		}
 	}
-	if err := tt.Click("别家相声"); err != nil {
-		t.Fatalf("click the show: %v", err)
-	}
-	if a.route.page != pagePlaylist || a.route.id != "MPSPPLother" {
-		t.Fatalf("the show card opened %+v, want its page", a.route)
+	if tt.HasText("相关推荐") {
+		t.Fatal("a podcast has a related tab")
 	}
 }
 

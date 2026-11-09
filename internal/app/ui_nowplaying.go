@@ -64,10 +64,11 @@ func activeLyricLine(lines []ytmusic.LyricLine, synced bool, pos time.Duration) 
 }
 
 // npPanes returns the tabs Now Playing shows. A podcast episode has no
-// lyrics to show, and its page offers none to fetch.
+// lyrics to show and no related shelf worth a tab — YouTube keeps its related
+// page empty for the shows these episodes come from — so it gets the queue.
 func (a *app) npPanes() []paneKind {
 	if cur := a.pl.Current(); cur != nil && cur.Podcast {
-		return []paneKind{paneQueue, paneRelated}
+		return []paneKind{paneQueue}
 	}
 	return []paneKind{paneLyrics, paneQueue, paneRelated}
 }

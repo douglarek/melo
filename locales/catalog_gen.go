@@ -864,16 +864,6 @@ func (msgs Messages) MoreActions() string {
 	return Catalog.Format(msgs.locale, "moreActions", nil)
 }
 
-// MoreEpisodes says "本节目其他单集"
-// in the language the app shows.
-func MoreEpisodes() string { return In(i18n.Locale()).MoreEpisodes() }
-
-// MoreEpisodes says "本节目其他单集"
-// in the language of msgs.
-func (msgs Messages) MoreEpisodes() string {
-	return Catalog.Format(msgs.locale, "moreEpisodes", nil)
-}
-
 // MusicVideo says "音乐视频"
 // in the language the app shows.
 func MusicVideo() string { return In(i18n.Locale()).MusicVideo() }
