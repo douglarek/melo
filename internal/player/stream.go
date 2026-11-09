@@ -640,8 +640,37 @@ type download struct {
 	n      int64
 	total  int64
 	done   bool
+	closed bool
 	err    error
 	cancel context.CancelFunc
+}
+
+// close stops the download and releases its file, removing the partial file
+// when asked. A finished download keeps its cached file.
+func (d *download) close(remove bool) {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return
+	}
+	d.closed = true
+	d.mu.Unlock()
+	if d.cancel != nil {
+		d.cancel()
+	}
+	d.mu.Lock()
+	for !d.done {
+		d.cond.Wait()
+	}
+	f := d.file
+	d.file = nil
+	d.mu.Unlock()
+	if f != nil {
+		_ = f.Close()
+	}
+	if remove {
+		_ = os.Remove(d.part)
+	}
 }
 
 func startDownload(ctx context.Context, u string, destPath string, contentLength int64) (*download, error) {
@@ -846,11 +875,10 @@ func openStreamingMP4(ctx context.Context, u string, cachePath string, durationM
 		err = dl.err
 		dl.mu.Unlock()
 		if err != nil {
+			dl.close(true)
 			return nil, err
 		}
-		if dl.file != nil {
-			_ = dl.file.Close()
-		}
+		dl.close(false)
 		return openMP4Stream(cachePath)
 	}
 
@@ -860,8 +888,10 @@ func openStreamingMP4(ctx context.Context, u string, cachePath string, durationM
 		dl.cond.Wait()
 	}
 	if dl.err != nil {
+		err := dl.err
 		dl.mu.Unlock()
-		return nil, dl.err
+		dl.close(true)
+		return nil, err
 	}
 	dl.mu.Unlock()
 
@@ -877,6 +907,7 @@ func openStreamingMP4(ctx context.Context, u string, cachePath string, durationM
 		r.pos = 0
 		dec, info, err = aacm4a.NewSeekableDecoder(r)
 		if err != nil {
+			dl.close(true)
 			return nil, err
 		}
 	}

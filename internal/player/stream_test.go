@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +20,39 @@ import (
 
 	"github.com/douglarek/melo/internal/ytmusic"
 )
+
+func TestOpenStreamingMP4CleansUpAfterHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gone", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	cache := filepath.Join(t.TempDir(), "song.mp4")
+	for _, resume := range []time.Duration{0, 3 * time.Second} {
+		if _, err := openStreamingMP4(context.Background(), srv.URL, cache, 0, 0, resume); err == nil {
+			t.Fatalf("resume %v: want an error", resume)
+		}
+		if _, err := os.Stat(cache + ".part"); !os.IsNotExist(err) {
+			t.Fatalf("resume %v: part file left: %v", resume, err)
+		}
+	}
+}
+
+func TestOpenStreamingMP4CleansUpOnBadData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write(make([]byte, 200*1024))
+	}))
+	defer srv.Close()
+
+	cache := filepath.Join(t.TempDir(), "bad.mp4")
+	if _, err := openStreamingMP4(context.Background(), srv.URL, cache, 0, 0, 0); err == nil {
+		t.Fatal("want a decoder error")
+	}
+	if _, err := os.Stat(cache + ".part"); !os.IsNotExist(err) {
+		t.Fatalf("part file left: %v", err)
+	}
+}
 
 func encodeADTS(t *testing.T, seconds float64) []byte {
 	t.Helper()
