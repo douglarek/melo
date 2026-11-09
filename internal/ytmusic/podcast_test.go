@@ -229,3 +229,54 @@ func TestBrowsePlaylistMarksEpisodesAsAPodcast(t *testing.T) {
 		t.Fatalf("a playlist of episodes came back as songs: %+v", pl)
 	}
 }
+
+// The liked songs' page carries no byline at all: reading it must not take
+// the app down, which is what an absent line did.
+func TestBrowsePlaylistWithoutAByline(t *testing.T) {
+	c := NewClient()
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"contents": {
+					"twoColumnBrowseResultsRenderer": {
+						"tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [{
+							"musicResponsiveHeaderRenderer": {"title": {"runs": [{"text": "我喜欢的音乐"}]}}
+						}]}}}}],
+						"secondaryContents": {"sectionListRenderer": {"contents": [{
+							"musicPlaylistShelfRenderer": {"contents": []}
+						}]}}
+					}
+				}
+			}`)),
+		}, nil
+	})}
+	pl, err := c.BrowsePlaylist(context.Background(), "LM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.Title != "我喜欢的音乐" || pl.Author != "" || pl.AuthorID != "" {
+		t.Fatalf("playlist = %+v", pl)
+	}
+}
+
+// A show's byline names its host's channel, which the page can open.
+func TestBrowsePlaylistReadsTheHostsChannel(t *testing.T) {
+	pl := browsePlaylistWith(t, `{
+		"contents": {
+			"twoColumnBrowseResultsRenderer": {
+				"tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [{
+					"musicResponsiveHeaderRenderer": {
+						"title": {"runs": [{"text": "相声汇"}]},
+						"straplineTextOne": {"runs": [{"text": "德云茶舍", "navigationEndpoint": {"browseEndpoint": {"browseId": "UChost"}}}]}
+					}
+				}]}}}}],
+				"secondaryContents": {"sectionListRenderer": {"contents": [{"musicShelfRenderer": {"contents": []}}]}}
+			}
+		}
+	}`)
+	if pl.Author != "德云茶舍" || pl.AuthorID != "UChost" {
+		t.Fatalf("byline = %q (%q)", pl.Author, pl.AuthorID)
+	}
+}

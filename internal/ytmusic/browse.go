@@ -832,9 +832,14 @@ func parsePlaylistHeader(raw any, pl *Playlist) {
 }
 
 // linkedChannelID returns the channel a line of runs links to, or "" when it
-// names none: the creator of a playlist, the host of a podcast show.
+// names none: the creator of a playlist, the host of a podcast show. The line
+// itself may be absent, as it is on the liked songs' page.
 func linkedChannelID(raw any) string {
-	runs, _ := raw.(map[string]any)["runs"].([]any)
+	line, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	runs, _ := line["runs"].([]any)
 	for _, rawRun := range runs {
 		run, _ := rawRun.(map[string]any)
 		nav, _ := run["navigationEndpoint"].(map[string]any)
