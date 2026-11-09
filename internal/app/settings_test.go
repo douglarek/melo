@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/douglarek/melo/internal/player"
+	"github.com/douglarek/melo/internal/ytmusic"
 )
 
 func TestCloseToTraySetting(t *testing.T) {
@@ -106,6 +109,52 @@ func TestTrackNotificationsSetting(t *testing.T) {
 // TestOpenSettingsCountsTheWholeCache checks that the size the settings window
 // reports is what the disk holds: the audio of tracks, the covers and what a
 // download left behind, not the audio alone.
+func TestClearCacheKeepsPlayingTrack(t *testing.T) {
+	a := newTestApp(t)
+	dir := filepath.Join(t.TempDir(), "cache")
+	cache := player.NewCache(dir, 1<<30)
+	a.pl.Cache = cache
+	a.pl.Resolve = func(context.Context, string) (*ytmusic.StreamInfo, error) {
+		return nil, errors.New("no stream in the test")
+	}
+	a.pl.SetQueue([]ytmusic.Track{{ID: "active", Title: "Active"}}, 0)
+
+	active := []string{
+		filepath.Join(dir, "active.mp4"),
+		filepath.Join(cache.SabrDir(), "active.m4a"),
+	}
+	dropped := []string{
+		filepath.Join(dir, "other.mp4"),
+		filepath.Join(cache.SabrDir(), "other.m4a"),
+	}
+	for _, path := range append(append([]string{}, active...), dropped...) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	a.settingsModalOpen = true
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("清理缓存"); err != nil {
+		t.Fatalf("clear cache: %v", err)
+	}
+
+	for _, path := range active {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("kept file %s: %v", path, err)
+		}
+	}
+	for _, path := range dropped {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("file %s was kept", path)
+		}
+	}
+}
+
 func TestOpenSettingsCountsTheWholeCache(t *testing.T) {
 	a := newTestApp(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")

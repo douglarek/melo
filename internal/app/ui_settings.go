@@ -226,7 +226,11 @@ func (a *app) settingsModalView(c *ui.Context) {
 							clearBtn := ui.Row(c.Key("clear-cache-btn")).Height(30).Radius(15).Background(p.card).Padding(0, 12).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 							if clearBtn.Clicked() {
 								if a.pl != nil && a.pl.Cache != nil {
-									a.pl.Cache.Clear()
+									keep := ""
+									if cur := a.pl.Current(); cur != nil {
+										keep = cur.ID
+									}
+									a.pl.Cache.ClearExcept(keep)
 								}
 								if a.art != nil {
 									a.art.Clear()
