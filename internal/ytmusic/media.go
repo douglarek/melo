@@ -60,8 +60,9 @@ func podcastShowArtists(item map[string]any) []ArtistRef {
 			if pageType, _ := config["pageType"].(string); pageType != "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE" {
 				continue
 			}
+			showID, _ := be["browseId"].(string)
 			if text, _ := run["text"].(string); text != "" {
-				return []ArtistRef{{Name: text}}
+				return []ArtistRef{{ID: showID, Name: text}}
 			}
 		}
 	}

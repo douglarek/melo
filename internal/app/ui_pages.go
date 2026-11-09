@@ -877,7 +877,7 @@ func (a *app) albumHeader(c *ui.Context, al *ytmusic.Album) {
 				if len(al.Artists) > 0 {
 					// The byline links like the artist line of every track
 					// below it, opening the artist rather than dead-ending.
-					a.artistByline(c, "album-"+al.ID, al.Artists, 14, p.text, p.text)
+					a.artistByline(c, "album-"+al.ID, al.Artists, 14, ytmusic.SearchArtists, p.text, p.text)
 				}
 				if al.Year != "" {
 					ui.Text(c, al.Year).FontSize(12).TextColor(p.muted)
@@ -1246,13 +1246,20 @@ func (a *app) renderTrackRow(c *ui.Context, tracks []ytmusic.Track, idx int, cur
 }
 
 func (a *app) artistLinks(c *ui.Context, t ytmusic.Track, color, hover ui.Color) ui.Element {
-	return a.artistByline(c, t.ID, t.Artists, 12, color, hover)
+	// A show a podcast episode plays under is not a musician: searching its
+	// name among the artists finds nothing.
+	fallback := ytmusic.SearchArtists
+	if t.Podcast {
+		fallback = ytmusic.SearchPodcasts
+	}
+	return a.artistByline(c, t.ID, t.Artists, 12, fallback, color, hover)
 }
 
-// artistByline renders artist names that open the artist's page. Page headers
-// and track rows share it so a name links wherever it appears; key scopes the
-// links within the caller.
-func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRef, size float32, color, hover ui.Color) ui.Element {
+// artistByline renders artist names that open the artist's page, the show's
+// page for a podcast, and a search of the artists or the podcasts when the
+// name carries no page. Page headers and track rows share it so a name links
+// wherever it appears; key scopes the links within the caller.
+func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRef, size float32, fallback ytmusic.SearchType, color, hover ui.Color) ui.Element {
 	return ui.Row(c).Wrap().AlignItems(ui.Center).Children(func() {
 		if len(artists) == 0 {
 			ui.Text(c, locales.UnknownArtist()).FontSize(size).TextColor(color)
@@ -1268,9 +1275,12 @@ func (a *app) artistByline(c *ui.Context, key string, artists []ytmusic.ArtistRe
 			if n > 0 {
 				ui.Text(c, ", ").FontSize(size).TextColor(color)
 			}
-			r := route{page: pageSearch, query: artist.Name, kind: ytmusic.SearchArtists}
-			if artist.ID != "" && strings.HasPrefix(artist.ID, "UC") {
+			r := route{page: pageSearch, query: artist.Name, kind: fallback}
+			switch {
+			case strings.HasPrefix(artist.ID, "UC"):
 				r = route{page: pageArtist, id: artist.ID}
+			case ytmusic.IsPodcastShowID(artist.ID):
+				r = route{page: pagePlaylist, id: artist.ID}
 			}
 			a.link(c.Key(fmt.Sprintf("art-link-%s-%d", key, n)), artist.Name, size, color, hover, r)
 			n++

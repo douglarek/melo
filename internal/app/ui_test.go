@@ -991,6 +991,55 @@ func TestPodcastPageSaysPodcast(t *testing.T) {
 	}
 }
 
+// A podcast's name opens the show, not a search of musicians that finds
+// nothing.
+func TestPodcastShowNameOpensTheShow(t *testing.T) {
+	a := newTestApp(t)
+	r := route{page: pageSearch, query: "郭德纲", kind: ytmusic.SearchPodcastEpisodes}
+	a.route = r
+	a.searches[r] = &ytmusic.SearchResult{Tracks: []ytmusic.Track{{
+		ID:      "ep1",
+		Title:   "第 1 期",
+		Podcast: true,
+		Artists: []ytmusic.ArtistRef{{ID: "MPSPPLshow", Name: "德云社相声"}},
+	}}}
+	a.playlists["MPSPPLshow"] = &ytmusic.Playlist{ID: "MPSPPLshow", Title: "德云社相声", Podcast: true}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("德云社相声"); err != nil {
+		t.Fatalf("click the show's name: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pagePlaylist || a.route.id != "MPSPPLshow" {
+		t.Fatalf("the show's name opened %+v, want the show's page", a.route)
+	}
+}
+
+// Where a row names its show without the page's ID, the search is of
+// podcasts, not of musicians.
+func TestPodcastNameWithoutAShowSearchesPodcasts(t *testing.T) {
+	a := newTestApp(t)
+	r := route{page: pageSearch, query: "郭德纲", kind: ytmusic.SearchPodcastEpisodes}
+	a.route = r
+	a.searches[r] = &ytmusic.SearchResult{Tracks: []ytmusic.Track{{
+		ID:      "ep2",
+		Title:   "第 2 期",
+		Podcast: true,
+		Artists: []ytmusic.ArtistRef{{Name: "没有页面的节目"}},
+	}}}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("没有页面的节目"); err != nil {
+		t.Fatalf("click the show's name: %v", err)
+	}
+	tt.Frame()
+	if a.route.page != pageSearch || a.route.kind != ytmusic.SearchPodcasts || a.route.query != "没有页面的节目" {
+		t.Fatalf("the show's name opened %+v, want a podcast search", a.route)
+	}
+}
+
 func TestActiveLyricLine(t *testing.T) {
 	lines := []ytmusic.LyricLine{
 		{TimeMs: 5000, Text: "一"},

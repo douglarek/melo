@@ -162,3 +162,41 @@ func TestItemHasPodcastEpisode(t *testing.T) {
 		})
 	}
 }
+
+// TestPodcastShowArtistsKeepsTheShowsID checks that a row naming its show
+// keeps the show's page ID: a name alone would send a click to a search of
+// musicians, which finds nothing.
+func TestPodcastShowArtistsKeepsTheShowsID(t *testing.T) {
+	item := map[string]any{
+		"secondTitle": map[string]any{"runs": []any{
+			map[string]any{"text": "2023年11月20日"},
+			map[string]any{"text": "相声汇", "navigationEndpoint": map[string]any{
+				"browseEndpoint": map[string]any{
+					"browseId": "MPSPPLshow",
+					"browseEndpointContextSupportedConfigs": map[string]any{
+						"browseEndpointContextMusicConfig": map[string]any{"pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"},
+					},
+				},
+			}},
+		}},
+	}
+	artists := podcastShowArtists(item)
+	if len(artists) != 1 || artists[0].ID != "MPSPPLshow" || artists[0].Name != "相声汇" {
+		t.Fatalf("show artists = %+v, want 相声汇 with its page", artists)
+	}
+}
+
+// An episode a search finds names its show the same way, and the show's page
+// is what its name opens.
+func TestExtractArtistsKeepsTheShowOfAnEpisode(t *testing.T) {
+	runs := []any{
+		map[string]any{"text": "2023年11月20日"},
+		map[string]any{"text": "相声汇", "navigationEndpoint": map[string]any{
+			"browseEndpoint": map[string]any{"browseId": "MPSPPLshow"},
+		}},
+	}
+	artists := extractArtistsFromRuns(runs)
+	if len(artists) != 2 || artists[1].ID != "MPSPPLshow" || artists[1].Name != "相声汇" {
+		t.Fatalf("artists = %+v, want the show with its page", artists)
+	}
+}

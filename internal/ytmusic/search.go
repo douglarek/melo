@@ -415,7 +415,9 @@ func extractArtistsFromRuns(runs []any) []ArtistRef {
 		nav, _ := m["navigationEndpoint"].(map[string]any)
 		be, _ := nav["browseEndpoint"].(map[string]any)
 		browseID, _ := be["browseId"].(string)
-		if strings.HasPrefix(browseID, "UC") {
+		// An episode names the show it belongs to, whose page is not an
+		// artist's but one to open all the same.
+		if strings.HasPrefix(browseID, "UC") || IsPodcastShowID(browseID) {
 			artists = append(artists, ArtistRef{
 				ID:   browseID,
 				Name: text,
