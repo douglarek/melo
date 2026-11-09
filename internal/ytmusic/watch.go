@@ -504,6 +504,12 @@ func (c *Client) player(ctx context.Context, payload map[string]any, clientName,
 
 // setPlayerAuth attaches the signed-in session to a player request.
 func (c *Client) setPlayerAuth(req *http.Request) {
+	c.setPlayerAuthOrigin(req, "https://www.youtube.com")
+}
+
+// setPlayerAuthOrigin attaches the session and the hash of the request's
+// origin, which the player checks.
+func (c *Client) setPlayerAuthOrigin(req *http.Request, origin string) {
 	c.mu.RLock()
 	cookie := c.cookie
 	c.mu.RUnlock()
@@ -512,7 +518,7 @@ func (c *Client) setPlayerAuth(req *http.Request) {
 	}
 	req.Header.Set("Cookie", cookie)
 	if sapisid := ExtractSAPISID(cookie); sapisid != "" {
-		req.Header.Set("Authorization", GenerateSAPISIDHash(sapisid, "https://www.youtube.com"))
+		req.Header.Set("Authorization", GenerateSAPISIDHash(sapisid, origin))
 	}
 }
 

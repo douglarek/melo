@@ -1,8 +1,11 @@
 package ytmusic
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +38,28 @@ func cookieResponse(req *http.Request) *http.Response {
 		Header:     header,
 		Body:       io.NopCloser(strings.NewReader(`{}`)),
 		Request:    req,
+	}
+}
+
+func TestSetPlayerAuthOrigin(t *testing.T) {
+	c := &Client{cookie: "SAPISID=test-sapisid; __Secure-3PAPISID=test-sapisid"}
+	req := httptest.NewRequest(http.MethodPost, "https://music.youtube.com/youtubei/v1/player", nil)
+	c.setPlayerAuthOrigin(req, "https://music.youtube.com")
+
+	if got := req.Header.Get("Cookie"); !strings.Contains(got, "SAPISID=test-sapisid") {
+		t.Fatalf("cookie = %q", got)
+	}
+	fields := strings.Fields(req.Header.Get("Authorization"))
+	if len(fields) != 2 || fields[0] != "SAPISIDHASH" {
+		t.Fatalf("authorization = %q", req.Header.Get("Authorization"))
+	}
+	ts, digest, ok := strings.Cut(fields[1], "_")
+	if !ok {
+		t.Fatalf("authorization value = %q", fields[1])
+	}
+	sum := sha1.Sum([]byte(ts + " test-sapisid https://music.youtube.com"))
+	if digest != hex.EncodeToString(sum[:]) {
+		t.Fatalf("digest = %q, want the music.youtube.com hash", digest)
 	}
 }
 
