@@ -27,6 +27,14 @@ var (
 	sessionGen     uint64
 )
 
+const sessionCookieKey = "cookie"
+
+var (
+	sessionSecretGet    = func() ([]byte, error) { return mygo.Secrets.Get(sessionCookieKey) }
+	sessionSecretSet    = func(v []byte) error { return mygo.Secrets.Set(sessionCookieKey, v) }
+	sessionSecretDelete = func() error { return mygo.Secrets.Delete(sessionCookieKey) }
+)
+
 var sessionFile = func() (string, error) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
@@ -98,6 +106,25 @@ func cloneSession(sess *SessionData) *SessionData {
 	return &clone
 }
 
+// writeSession stores the cookie in the system credential store when it can,
+// and the rest in the session file. A store that is unsupported, refuses, or
+// has no room leaves the cookie in the file, as before.
+func writeSession(sess *SessionData) error {
+	clone := cloneSession(sess)
+	if clone.Cookie == "" {
+		_ = sessionSecretDelete()
+	} else if len(clone.Cookie) <= mygo.MaxSecretSize {
+		if err := sessionSecretSet([]byte(clone.Cookie)); err == nil {
+			clone.Cookie = ""
+		}
+	}
+	b, err := json.Marshal(clone)
+	if err != nil {
+		return err
+	}
+	return writeSessionBytes(b)
+}
+
 // SaveSession persists session data and makes it current.
 func SaveSession(sess *SessionData) error {
 	sessionMu.Lock()
@@ -107,11 +134,7 @@ func SaveSession(sess *SessionData) error {
 	}
 
 	clone := cloneSession(sess)
-	b, err := json.Marshal(clone)
-	if err != nil {
-		return err
-	}
-	if err := writeSessionBytes(b); err != nil {
+	if err := writeSession(clone); err != nil {
 		return err
 	}
 	currentSession = clone
@@ -131,6 +154,21 @@ func LoadSession() (*SessionData, error) {
 		return nil, err
 	}
 
+	if secret, err := sessionSecretGet(); err == nil && len(secret) > 0 {
+		sess.Cookie = string(secret)
+	} else if sess.Cookie != "" && len(sess.Cookie) <= mygo.MaxSecretSize {
+		if err := sessionSecretSet([]byte(sess.Cookie)); err == nil {
+			stripped := cloneSession(&sess)
+			stripped.Cookie = ""
+			if b, err := json.Marshal(stripped); err == nil {
+				_ = writeSessionBytes(b)
+			}
+		}
+	}
+	if sess.Cookie == "" {
+		return nil, errors.New("no saved session")
+	}
+
 	sessionMu.Lock()
 	currentSession = cloneSession(&sess)
 	sessionGen++
@@ -148,6 +186,7 @@ func ClearSession() error {
 	sessionMu.Unlock()
 
 	DefaultClient.SetAuth("")
+	_ = sessionSecretDelete()
 	return deleteSessionBytes()
 }
 
@@ -186,11 +225,7 @@ func UpdateSessionCookie(gen uint64, cookie string) error {
 
 	clone := cloneSession(currentSession)
 	clone.Cookie = cookie
-	b, err := json.Marshal(clone)
-	if err != nil {
-		return err
-	}
-	if err := writeSessionBytes(b); err != nil {
+	if err := writeSession(clone); err != nil {
 		return err
 	}
 	currentSession = clone

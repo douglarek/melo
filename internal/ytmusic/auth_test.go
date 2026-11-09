@@ -3,13 +3,17 @@ package ytmusic
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -18,16 +22,109 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func useTempSessionFile(t *testing.T) {
+func useTempSessionFile(t *testing.T) *[]byte {
 	t.Helper()
-	old := sessionFile
+	oldFile := sessionFile
+	oldGet, oldSet, oldDelete := sessionSecretGet, sessionSecretSet, sessionSecretDelete
+	var secret []byte
+	path := filepath.Join(t.TempDir(), "session.json")
 	sessionFile = func() (string, error) {
-		return filepath.Join(t.TempDir(), "session.json"), nil
+		return path, nil
+	}
+	sessionSecretGet = func() ([]byte, error) {
+		if secret == nil {
+			return nil, mygo.ErrSecretNotFound
+		}
+		return append([]byte(nil), secret...), nil
+	}
+	sessionSecretSet = func(v []byte) error {
+		secret = append([]byte(nil), v...)
+		return nil
+	}
+	sessionSecretDelete = func() error {
+		secret = nil
+		return nil
 	}
 	t.Cleanup(func() {
-		sessionFile = old
 		_ = ClearSession()
+		sessionFile = oldFile
+		sessionSecretGet, sessionSecretSet, sessionSecretDelete = oldGet, oldSet, oldDelete
 	})
+	return &secret
+}
+
+func TestSaveSessionKeepsCookieInSecretStore(t *testing.T) {
+	secret := useTempSessionFile(t)
+	if err := SaveSession(&SessionData{Cookie: "SID=secret", Profile: &Profile{Name: "me"}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if string(*secret) != "SID=secret" {
+		t.Fatalf("secret = %q", *secret)
+	}
+	path, err := sessionFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "SID=secret") {
+		t.Fatalf("cookie leaked into the session file: %s", data)
+	}
+	loaded, err := LoadSession()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Cookie != "SID=secret" {
+		t.Fatalf("loaded cookie = %q", loaded.Cookie)
+	}
+}
+
+func TestLoadSessionMovesFileCookieToSecretStore(t *testing.T) {
+	secret := useTempSessionFile(t)
+	*secret = nil
+	if err := writeSessionBytes([]byte(`{"cookie":"SID=legacy","profile":{"name":"me"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSession()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Cookie != "SID=legacy" {
+		t.Fatalf("loaded cookie = %q", loaded.Cookie)
+	}
+	if string(*secret) != "SID=legacy" {
+		t.Fatalf("migrated secret = %q", *secret)
+	}
+	path, _ := sessionFile()
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "SID=legacy") {
+		t.Fatalf("cookie stayed in the session file: %s", data)
+	}
+}
+
+func TestSaveSessionFallsBackToFileWithoutSecretStore(t *testing.T) {
+	useTempSessionFile(t)
+	old := sessionSecretSet
+	sessionSecretSet = func([]byte) error { return errors.ErrUnsupported }
+	t.Cleanup(func() { sessionSecretSet = old })
+
+	if err := SaveSession(&SessionData{Cookie: "SID=fallback"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	path, _ := sessionFile()
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "SID=fallback") {
+		t.Fatalf("cookie missing from the fallback file: %s", data)
+	}
+	loaded, err := LoadSession()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Cookie != "SID=fallback" {
+		t.Fatalf("loaded cookie = %q", loaded.Cookie)
+	}
 }
 
 func cookieResponse(req *http.Request) *http.Response {
