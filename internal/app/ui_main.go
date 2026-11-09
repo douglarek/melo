@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/douglarek/melo/locales"
@@ -43,7 +45,8 @@ func (a *app) view(c *ui.Context) {
 		c.OnShortcut(0, ui.KeyForward, a.forward)
 	}
 
-	root := ui.Box(c).Fill().Background(p.bg).Selectable()
+	a.shelfRects = a.shelfRects[:0]
+	root := ui.Box(c).Fill().Background(p.bg).Selectable().HandleInput(a.navScroll)
 	root.Children(func() {
 		// Main 2-column layout (Sidebar + Content)
 		ui.Row(c).Fill().Children(func() {
@@ -61,7 +64,15 @@ func (a *app) view(c *ui.Context) {
 					a.header(c)
 
 					// Page body scroll area
-					ui.Box(c).Grow(1).FillWidth().Children(func() {
+					page := ui.Box(c.Key("page-" + a.routeKey())).Grow(1).FillWidth()
+					if a.navDir != 0 {
+						enterX := float32(a.navDir) * 32
+						page.Transition(ui.ElementTransition{
+							Duration: 220 * time.Millisecond,
+							Enter:    &ui.Motion{X: enterX, Opacity: 0.6},
+						})
+					}
+					page.Children(func() {
 						if a.pageUsesTrackList() {
 							ui.Box(c).Grow(1).FillWidth().Padding(24, 32, playerHeight+24, 32).Children(func() {
 								a.content(c)
@@ -101,6 +112,55 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.playbackErr)
 		a.playbackErr = ""
 	}
+}
+
+// navScroll turns a horizontal trackpad gesture into back or forward, as a
+// browser's swipe does. A gesture over a horizontal shelf or an overlay is
+// left alone.
+func (a *app) navScroll(ev ui.InputEvent) bool {
+	if ev.Kind != ui.InputScroll || !ev.Precise || ev.Momentum || ev.Mods != 0 {
+		a.navDX, a.navDY = 0, 0
+		a.navFired = false
+		return false
+	}
+	overShelf := false
+	for _, r := range a.shelfRects {
+		if ev.X >= r.X && ev.X <= r.X+r.W && ev.Y >= r.Y && ev.Y <= r.Y+r.H+12 {
+			overShelf = true
+			break
+		}
+	}
+	if overShelf || a.nowPlayingOpen || a.settingsModalOpen || a.accountModalOpen {
+		a.navDX, a.navDY = 0, 0
+		a.navFired = false
+		return false
+	}
+	now := time.Now()
+	if now.Sub(a.navAt) > 250*time.Millisecond {
+		a.navDX, a.navDY = 0, 0
+		a.navFired = false
+	}
+	a.navAt = now
+	a.navDX += ev.DX
+	a.navDY += ev.DY
+	dx := a.navDX
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := a.navDY
+	if dy < 0 {
+		dy = -dy
+	}
+	if a.navFired || dx < 60 || dx < 2*dy {
+		return false
+	}
+	a.navFired = true
+	if a.navDX < 0 {
+		a.back()
+	} else {
+		a.forward()
+	}
+	return true
 }
 
 func (a *app) sidebar(c *ui.Context) {

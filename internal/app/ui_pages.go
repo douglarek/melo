@@ -204,7 +204,8 @@ func (a *app) renderSectionWithArt(c *ui.Context, key string, sec ytmusic.Sectio
 		if len(items) > 40 {
 			items = items[:40]
 		}
-		ui.ScrollHorizontal(c).TrackScroll(state).FillWidth().Children(func() {
+		shelf := ui.ScrollHorizontal(c).TrackScroll(state).FillWidth()
+		shelf.Children(func() {
 			ui.Row(c).Gap(16).Padding(0, 0, 10, 0).AlignItems(ui.Start).Children(func() {
 				// Load covers for the visible cards and a small buffer. Loading
 				// every cover in a long shelf floods the art cache and forces a
@@ -216,6 +217,7 @@ func (a *app) renderSectionWithArt(c *ui.Context, key string, sec ytmusic.Sectio
 				}
 			})
 		})
+		a.shelfRects = append(a.shelfRects, shelf.Bounds())
 	})
 }
 

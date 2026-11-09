@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"slices"
@@ -126,10 +127,20 @@ type app struct {
 	moodPages     map[string]int
 	loadingMore   map[string]bool
 	contentScroll ui.ScrollState
-	liked         []ytmusic.Track
-	tray          *mygo.Tray
-	trayErr       error
-	quitting      bool
+
+	// navDX and navDY accumulate a horizontal trackpad gesture; navAt is its
+	// last event, and navFired keeps one gesture to one navigation.
+	navDX, navDY float32
+	navAt        time.Time
+	navFired     bool
+	shelfRects   []ui.Rect
+	// navDir is the last navigation's direction: -1 back, 1 forward or into
+	// a page.
+	navDir   int
+	liked    []ytmusic.Track
+	tray     *mygo.Tray
+	trayErr  error
+	quitting bool
 
 	libraryPlaylists []ytmusic.PlaylistItem
 	libraryItems     []ytmusic.CardItem
@@ -416,6 +427,7 @@ func (a *app) open(r route) {
 	if a.route == r {
 		return
 	}
+	a.navDir = 1
 	a.history = append(a.history, a.route)
 	a.forwardHistory = nil
 	a.route = r
@@ -429,6 +441,7 @@ func (a *app) back() {
 	if len(a.history) == 0 {
 		return
 	}
+	a.navDir = -1
 	prev := a.history[len(a.history)-1]
 	a.history = a.history[:len(a.history)-1]
 	a.forwardHistory = append(a.forwardHistory, a.route)
@@ -443,6 +456,7 @@ func (a *app) forward() {
 	if len(a.forwardHistory) == 0 {
 		return
 	}
+	a.navDir = 1
 	next := a.forwardHistory[len(a.forwardHistory)-1]
 	a.forwardHistory = a.forwardHistory[:len(a.forwardHistory)-1]
 	a.history = append(a.history, a.route)
@@ -451,6 +465,12 @@ func (a *app) forward() {
 	a.contentScroll.MaxY = 0
 	a.loadCurrentRoute()
 	a.releaseMemorySoon()
+}
+
+// routeKey identifies a page for its enter and exit transition.
+func (a *app) routeKey() string {
+	r := a.route
+	return fmt.Sprintf("%d-%s-%s-%s-%d", r.page, r.id, r.params, r.query, r.kind)
 }
 
 func (a *app) loadCurrentRoute() {

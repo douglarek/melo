@@ -16,6 +16,65 @@ import (
 	"github.com/douglarek/melo/internal/ytmusic"
 )
 
+func TestNavGestureLeavesShelvesAlone(t *testing.T) {
+	a := newTestApp(t)
+	a.homeSections = []ytmusic.Section{{
+		Title: "每日发现",
+		Items: []ytmusic.CardItem{
+			{ID: "a", Title: "A", Type: "track", Track: &ytmusic.Track{ID: "a", Title: "A"}},
+			{ID: "b", Title: "B", Type: "track", Track: &ytmusic.Track{ID: "b", Title: "B"}},
+		},
+	}}
+	a.exploreSections = []ytmusic.Section{{}}
+	a.route = route{page: pageHome}
+	a.history = []route{{page: pageExplore}}
+
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	tt.Frame()
+	if len(a.shelfRects) == 0 {
+		t.Fatal("no shelf bounds were recorded")
+	}
+	r := a.shelfRects[0]
+	tt.Scroll(r.X+10, r.Y+10, -80, 0)
+	if a.route.page != pageHome {
+		t.Fatal("a swipe over the shelf navigated")
+	}
+
+	tt.Scroll(20, 300, -80, 0)
+	if a.route.page != pageExplore {
+		t.Fatalf("a swipe outside the shelf did not go back: %v", a.route.page)
+	}
+}
+
+func TestNavScrollGesture(t *testing.T) {
+	a := newTestApp(t)
+	a.homeSections = []ytmusic.Section{{}}
+	a.route = route{page: pageSearch, query: "x"}
+	a.history = []route{{page: pageHome}}
+
+	if a.navScroll(ui.InputEvent{Kind: ui.InputScroll, DX: -30, Precise: true}) {
+		t.Fatal("a short swipe was taken")
+	}
+	if len(a.history) != 1 {
+		t.Fatal("a short swipe navigated")
+	}
+	if !a.navScroll(ui.InputEvent{Kind: ui.InputScroll, DX: -40, Precise: true}) {
+		t.Fatal("the swipe was not taken")
+	}
+	if a.route.page != pageHome || len(a.forwardHistory) != 1 {
+		t.Fatalf("after back: route=%v forward=%d", a.route.page, len(a.forwardHistory))
+	}
+
+	a.navFired = false
+	a.navDX = 0
+	a.navAt = time.Time{}
+	a.shelfRects = []ui.Rect{{X: 0, Y: 0, W: 200, H: 100}}
+	if a.navScroll(ui.InputEvent{Kind: ui.InputScroll, X: 50, Y: 50, DX: -100, Precise: true}) {
+		t.Fatal("a swipe over a shelf was taken")
+	}
+}
+
 func TestNavigation(t *testing.T) {
 	a := newTestApp(t)
 	tt := ui.NewTester(a.view, 1200, 800)
