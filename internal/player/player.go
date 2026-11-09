@@ -114,6 +114,7 @@ func (p *Player) SetContext(ctx context.Context) {
 func (p *Player) Close() error {
 	p.mu.Lock()
 	if !p.closed {
+		p.pauseOffset = p.positionLocked()
 		p.closed = true
 		p.loading = false
 		p.playing = false

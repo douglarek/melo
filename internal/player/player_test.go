@@ -45,6 +45,22 @@ func TestChangedCallbackRunsOutsidePlayerLock(t *testing.T) {
 	}
 }
 
+func TestCloseKeepsPosition(t *testing.T) {
+	p := newTestPlayer(t)
+	p.mu.Lock()
+	p.pauseOffset = 5 * time.Second
+	p.playing = true
+	p.playStart = time.Now().Add(-2 * time.Second)
+	p.mu.Unlock()
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if got := p.Position(); got < 6900*time.Millisecond || got > 7200*time.Millisecond {
+		t.Fatalf("position after close = %v, want about 7s", got)
+	}
+}
+
 func TestPlayerCloseCancelsLoad(t *testing.T) {
 	p := newTestPlayer(t)
 	started := make(chan struct{})
