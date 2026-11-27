@@ -8,8 +8,8 @@ import (
 
 // mediaCommands are what the media keys and the system's media controls may
 // ask of the app.
-const mediaCommands = mygo.MediaPlay | mygo.MediaPause | mygo.MediaNext |
-	mygo.MediaPrevious | mygo.MediaSeek
+const mediaCommands = mygo.MediaPlay | mygo.MediaPause | mygo.MediaStop |
+	mygo.MediaNext | mygo.MediaPrevious | mygo.MediaSeek
 
 // setupMediaKeys has the media keys of keyboards and headsets, and the
 // system's own media controls, drive the player.
@@ -21,7 +21,9 @@ func (a *app) handleMediaCommand(cmd mygo.MediaCommand, pos time.Duration) {
 	switch cmd {
 	case mygo.MediaPlay:
 		a.pl.Play()
-	case mygo.MediaPause:
+	case mygo.MediaPause, mygo.MediaStop:
+		// A stop key stops the sound where it is, keeping the place the
+		// listener reached.
 		a.pl.Pause()
 	case mygo.MediaNext:
 		a.pl.Next()
