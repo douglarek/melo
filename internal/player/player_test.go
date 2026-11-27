@@ -747,3 +747,36 @@ func TestResolveSeesTheTrackKind(t *testing.T) {
 		t.Fatal("the resolver did not see the track")
 	}
 }
+
+func TestUnsupportedCodecTrackIsSkipped(t *testing.T) {
+	p := newTestPlayer(t)
+	asked := make(chan string, 8)
+	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
+		asked <- track.ID
+		if track.ID == "he-aac" {
+			return nil, fmt.Errorf("podcast: %w", ytmusic.ErrUnsupportedCodec)
+		}
+		return nil, errors.New("stop at next")
+	}
+	errored := make(chan string, 8)
+	p.Error = func(id string, err error) { errored <- id }
+
+	p.SetQueue([]ytmusic.Track{
+		{ID: "he-aac", Title: "HE-AAC Episode", Podcast: true},
+		{ID: "next-ep", Title: "Next Episode", Podcast: true},
+	}, 0)
+
+	for want := range 2 {
+		select {
+		case id := <-errored:
+			if want == 0 && id != "he-aac" {
+				t.Fatalf("first error = %q, want he-aac", id)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("track %d never reported error", want+1)
+		}
+	}
+	if cur := p.Current(); cur == nil || cur.ID != "next-ep" {
+		t.Fatalf("current = %+v, want next-ep", cur)
+	}
+}

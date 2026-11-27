@@ -311,13 +311,16 @@ func TestPickAndroidAudio(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &sd); err != nil {
 		t.Fatalf("json unmarshal: %v", err)
 	}
-	if f := pickAndroidAudio(sd); f == nil || f["itag"].(float64) != 18 {
-		t.Fatalf("expected itag 18, got %+v", f)
+	if f := pickAndroidAudio(sd); f == nil || f["itag"].(float64) != 140 {
+		t.Fatalf("expected adaptive itag 140, got %+v", f)
 	}
 
-	delete(sd, "formats")
-	if f := pickAndroidAudio(sd); f == nil || f["itag"].(float64) != 140 {
-		t.Fatalf("expected itag 140 fallback, got %+v", f)
+	// Only HE-AAC in adaptiveFormats falls back to muxed itag 18 for general tracks.
+	sd["adaptiveFormats"] = []any{
+		map[string]any{"itag": 139, "url": "https://example.com/139.m4a", "mimeType": "audio/mp4; codecs=\"mp4a.40.5\""},
+	}
+	if f := pickAndroidAudio(sd); f == nil || f["itag"].(float64) != 18 {
+		t.Fatalf("expected itag 18 fallback, got %+v", f)
 	}
 }
 

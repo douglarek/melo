@@ -700,7 +700,7 @@ func (p *Player) failLoad(gen int, track ytmusic.Track, err error) {
 		return
 	}
 	skip := false
-	if errors.Is(err, ytmusic.ErrUnavailable) && p.pendingPlay {
+	if (errors.Is(err, ytmusic.ErrUnavailable) || errors.Is(err, ytmusic.ErrUnsupportedCodec)) && p.pendingPlay {
 		p.failStreak++
 		if p.failStreak < len(p.order) && (p.at+1 < len(p.order) || p.repeat == RepeatAll) {
 			skip = true

@@ -126,10 +126,14 @@ func (c *Client) GetNext(ctx context.Context, videoID string, playlistID string)
 	return nextTracks, lyricsBrowseID, nil
 }
 
-// pickAndroidAudio prefers the muxed itag 18 MP4, which is a complete
-// faststart file. Adaptive itag 140 is audio-only AAC-LC but may be a
-// fragmented MP4 whose URL is range-limited.
+// pickAndroidAudio prefers adaptive AAC-LC (such as itag 140) over muxed
+// itag 18 because muxed itag 18 can carry HE-AAC audio that go-aac cannot
+// decode.
 func pickAndroidAudio(sd map[string]any) map[string]any {
+	if f := pickAndroidAdaptiveLC(sd); f != nil {
+		return f
+	}
+
 	formats, _ := sd["formats"].([]any)
 	for _, raw := range formats {
 		f, ok := raw.(map[string]any)
@@ -144,22 +148,136 @@ func pickAndroidAudio(sd map[string]any) map[string]any {
 			return f
 		}
 	}
+	return nil
+}
 
-	adaptive, _ := sd["adaptiveFormats"].([]any)
-	for _, raw := range adaptive {
-		f, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		mime, _ := f["mimeType"].(string)
-		if !strings.Contains(mime, "audio/mp4") || !strings.Contains(mime, "mp4a.40.2") {
-			continue
-		}
-		if u, _ := f["url"].(string); u != "" {
-			return f
+func isAndroidAACLC(f map[string]any) bool {
+	u, _ := f["url"].(string)
+	if u == "" {
+		return false
+	}
+	mime, _ := f["mimeType"].(string)
+	return strings.Contains(mime, "audio/mp4") && strings.Contains(mime, "mp4a.40.2")
+}
+
+func isHEAACMime(mime string) bool {
+	return strings.Contains(mime, "mp4a.40.5") || strings.Contains(mime, "mp4a.40.29")
+}
+
+func isAndroidHEAAC(f map[string]any) bool {
+	mime, _ := f["mimeType"].(string)
+	if isHEAACMime(mime) {
+		return true
+	}
+	itag, _ := f["itag"].(float64)
+	switch int(itag) {
+	case 139, 599:
+		return true
+	case 18:
+		// YouTube's muxed itag 18 often carries HE-AAC (22050 Hz core) even
+		// when its mimeType string claims mp4a.40.2.
+		if sr, _ := f["audioSampleRate"].(string); sr == "22050" {
+			return true
 		}
 	}
-	return nil
+	return false
+}
+
+func hasAndroidHEAAC(sd map[string]any) bool {
+	for _, key := range []string{"adaptiveFormats", "formats"} {
+		items, _ := sd[key].([]any)
+		for _, raw := range items {
+			f, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if u, _ := f["url"].(string); u == "" {
+				continue
+			}
+			if isAndroidHEAAC(f) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func androidAdaptiveLCScore(f map[string]any) int {
+	score := 1
+	if itag, _ := f["itag"].(float64); int(itag) == 140 {
+		score += 100
+	}
+	if at, ok := f["audioTrack"].(map[string]any); ok {
+		if isDef, ok := at["audioIsDefault"].(bool); ok {
+			if isDef {
+				score += 50
+			} else {
+				score -= 50
+			}
+		}
+		if dub, ok := at["isAutoDubbed"].(bool); ok && dub {
+			score -= 25
+		}
+	}
+	if drc, ok := f["isDrc"].(bool); ok && drc {
+		score -= 5
+	}
+	return score
+}
+
+// pickAndroidAdaptiveLC returns the best adaptive audio/mp4 AAC-LC format
+// (preferring itag 140 and default non-dubbed audio tracks).
+func pickAndroidAdaptiveLC(sd map[string]any) map[string]any {
+	adaptive, _ := sd["adaptiveFormats"].([]any)
+	var best map[string]any
+	bestScore := -1000
+	for _, raw := range adaptive {
+		f, ok := raw.(map[string]any)
+		if !ok || !isAndroidAACLC(f) {
+			continue
+		}
+		if score := androidAdaptiveLCScore(f); best == nil || score > bestScore {
+			best = f
+			bestScore = score
+		}
+	}
+	return best
+}
+
+func androidStreamInfo(videoID string, f map[string]any) *StreamInfo {
+	u, _ := f["url"].(string)
+	if u == "" {
+		return nil
+	}
+	itag, _ := f["itag"].(float64)
+	durMs := int64(0)
+	if dStr, ok := f["approxDurationMs"].(string); ok {
+		durMs, _ = strconv.ParseInt(dStr, 10, 64)
+	}
+	sampleRate := 44100
+	if sr, ok := f["audioSampleRate"].(string); ok {
+		if v, err := strconv.Atoi(sr); err == nil && v > 0 {
+			sampleRate = v
+		}
+	}
+	channels := 2
+	if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
+		channels = int(ch)
+	}
+	contentLength := int64(0)
+	if cl, ok := f["contentLength"].(string); ok {
+		contentLength, _ = strconv.ParseInt(cl, 10, 64)
+	}
+	return &StreamInfo{
+		VideoID:       videoID,
+		DirectURL:     u,
+		Format:        "mp4",
+		SampleRate:    sampleRate,
+		Channels:      channels,
+		DurationMs:    durMs,
+		ContentLength: contentLength,
+		Fallback:      int(itag) == 18,
+	}
 }
 
 // GetLyrics fetches and parses the lyrics for a song.
@@ -535,17 +653,19 @@ func (c *Client) iosPlayer(ctx context.Context, videoID string) (map[string]any,
 // region locked or removed.
 var ErrUnavailable = errors.New("track is not available")
 
+// ErrUnsupportedCodec says the available streams use a codec the player cannot
+// decode (such as HE-AAC / SBR).
+var ErrUnsupportedCodec = errors.New("unsupported audio codec")
+
 // ResolveStream resolves the sound to play: a SABR download (AAC 128 kbps)
-// when it is configured and works, else the ANDROID client's stream, which
-// is reliable and progressive when it has it, or else the HLS one iOS serves.
-// A podcast episode has no stream of its own: the signed-in web client names
-// the file of its show's feed, which is where it plays from.
+// when it is configured and works, else the ANDROID client's stream, or else
+// the HLS one iOS serves. For podcast episodes, an adaptive AAC-LC stream from
+// ANDROID is tried before the RSS enclosure and SABR/HLS fallbacks so HE-AAC
+// enclosures are avoided.
 func (c *Client) ResolveStream(ctx context.Context, track Track) (*StreamInfo, error) {
 	videoID := track.ID
 	if track.Podcast {
-		if info, err := c.resolvePodcast(ctx, videoID); err == nil {
-			return info, nil
-		}
+		return c.resolvePodcastStream(ctx, videoID)
 	}
 	sabrErr := error(nil)
 	if info, err := c.resolveSabrFile(ctx, videoID); err == nil {
@@ -559,36 +679,8 @@ func (c *Client) ResolveStream(ctx context.Context, track Track) (*StreamInfo, e
 		}
 		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
 			if f := pickAndroidAudio(sd); f != nil {
-				if u, _ := f["url"].(string); u != "" {
-					itag, _ := f["itag"].(float64)
-					durMs := int64(0)
-					if dStr, ok := f["approxDurationMs"].(string); ok {
-						durMs, _ = strconv.ParseInt(dStr, 10, 64)
-					}
-					sampleRate := 44100
-					if sr, ok := f["audioSampleRate"].(string); ok {
-						if v, err := strconv.Atoi(sr); err == nil && v > 0 {
-							sampleRate = v
-						}
-					}
-					channels := 2
-					if ch, ok := f["audioChannels"].(float64); ok && ch > 0 {
-						channels = int(ch)
-					}
-					contentLength := int64(0)
-					if cl, ok := f["contentLength"].(string); ok {
-						contentLength, _ = strconv.ParseInt(cl, 10, 64)
-					}
-					return &StreamInfo{
-						VideoID:       videoID,
-						DirectURL:     u,
-						Format:        "mp4",
-						SampleRate:    sampleRate,
-						Channels:      channels,
-						DurationMs:    durMs,
-						ContentLength: contentLength,
-						Fallback:      int(itag) == 18,
-					}, nil
+				if info := androidStreamInfo(videoID, f); info != nil {
+					return info, nil
 				}
 			}
 		}
@@ -598,6 +690,52 @@ func (c *Client) ResolveStream(ctx context.Context, track Track) (*StreamInfo, e
 		return nil, ErrUnavailable
 	}
 	return c.ResolveHLS(ctx, videoID)
+}
+
+func (c *Client) resolvePodcastStream(ctx context.Context, videoID string) (*StreamInfo, error) {
+	var sawUnsupportedCodec bool
+	var androidUnavailable bool
+
+	if pResp, err := c.androidPlayer(ctx, videoID); err == nil {
+		if ps, _ := pResp["playabilityStatus"].(map[string]any); ps["status"] == "UNPLAYABLE" {
+			androidUnavailable = true
+		}
+		if sd, _ := pResp["streamingData"].(map[string]any); sd != nil {
+			if f := pickAndroidAdaptiveLC(sd); f != nil {
+				if info := androidStreamInfo(videoID, f); info != nil {
+					return info, nil
+				}
+			}
+			if hasAndroidHEAAC(sd) {
+				sawUnsupportedCodec = true
+			}
+		}
+	}
+
+	if info, err := c.resolvePodcast(ctx, videoID); err == nil {
+		return info, nil
+	} else if errors.Is(err, ErrUnsupportedCodec) {
+		sawUnsupportedCodec = true
+	}
+
+	var sabrErr error
+	if info, err := c.resolveSabrFile(ctx, videoID); err == nil {
+		return info, nil
+	} else {
+		sabrErr = err
+	}
+
+	info, hlsErr := c.ResolveHLS(ctx, videoID)
+	if hlsErr == nil {
+		return info, nil
+	}
+	if sawUnsupportedCodec {
+		return nil, fmt.Errorf("%w: only HE-AAC audio is available", ErrUnsupportedCodec)
+	}
+	if errors.Is(sabrErr, ErrUnavailable) || androidUnavailable {
+		return nil, ErrUnavailable
+	}
+	return nil, hlsErr
 }
 
 // streamsVideo reports whether a player format carries a picture: the

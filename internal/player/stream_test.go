@@ -18,6 +18,7 @@ import (
 	"time"
 
 	aacpcm "github.com/tphakala/go-aac/pcm"
+	m4a "github.com/tphakala/go-m4a"
 
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -451,4 +452,124 @@ func TestHLSBackwardSeekAfterEviction(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("cached HLS audio was not published after backward seek")
+}
+
+func buildSyntheticDashMP4(t *testing.T, seconds float64, minSize int) []byte {
+	t.Helper()
+
+	adts := encodeADTS(t, seconds)
+	var aus [][]byte
+	for i := 0; i < len(adts); {
+		if i+7 > len(adts) || adts[i] != 0xff || adts[i+1]&0xf6 != 0xf0 {
+			t.Fatalf("invalid ADTS frame at %d", i)
+		}
+		frameLen := (int(adts[i+3]&0x03) << 11) | (int(adts[i+4]) << 3) | (int(adts[i+5]) >> 5)
+		aus = append(aus, adts[i+7:i+frameLen])
+		i += frameLen
+	}
+
+	// AAC-LC, 44100 Hz (index 4), 2 channels: (2<<11) | (4<<7) | (2<<3) = 0x1210.
+	wcfg := m4a.WriterConfig{
+		SampleRate: 44100,
+		Channels:   2,
+		ASC:        []byte{0x12, 0x10},
+	}
+	initSeg, err := m4a.InitSegment(wcfg)
+	if err != nil {
+		t.Fatalf("InitSegment: %v", err)
+	}
+	stream := bytes.Clone(initSeg)
+
+	// Pad with a free box if requested so multi-chunk Range downloads (>256 KiB) are exercised.
+	if minSize > len(stream)+8 {
+		pad := make([]byte, minSize-len(stream))
+		binary.BigEndian.PutUint32(pad[0:4], uint32(len(pad)))
+		copy(pad[4:8], "free")
+		stream = append(stream, pad...)
+	}
+
+	fw, err := m4a.NewFragmentWriter(wcfg)
+	if err != nil {
+		t.Fatalf("NewFragmentWriter: %v", err)
+	}
+	for i, au := range aus {
+		if err := fw.WriteFrame(au); err != nil {
+			t.Fatalf("WriteFrame: %v", err)
+		}
+		if (i+1)%10 == 0 {
+			stream, err = fw.AppendSegment(stream)
+			if err != nil {
+				t.Fatalf("AppendSegment: %v", err)
+			}
+		}
+	}
+	if fw.PendingSamples() > 0 {
+		stream, err = fw.AppendSegment(stream)
+		if err != nil {
+			t.Fatalf("AppendSegment tail: %v", err)
+		}
+	}
+	return stream
+}
+
+func TestOpenStreamingMP4FragmentedDashRangeOnly(t *testing.T) {
+	data := buildSyntheticDashMP4(t, 1.0, 270*1024)
+	var rangeReqs atomic.Int32
+	var fullGetReqs atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		if rng == "" {
+			fullGetReqs.Add(1)
+			http.Error(w, "full GET forbidden", http.StatusForbidden)
+			return
+		}
+		rangeReqs.Add(1)
+		spec, ok := strings.CutPrefix(rng, "bytes=")
+		if !ok {
+			http.Error(w, "bad range", http.StatusBadRequest)
+			return
+		}
+		startStr, endStr, ok := strings.Cut(spec, "-")
+		if !ok {
+			http.Error(w, "bad range", http.StatusBadRequest)
+			return
+		}
+		start, err1 := strconv.ParseInt(startStr, 10, 64)
+		end, err2 := strconv.ParseInt(endStr, 10, 64)
+		if err1 != nil || err2 != nil || start < 0 || end >= int64(len(data)) || start > end {
+			http.Error(w, "range out of bounds", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[start : end+1])
+	}))
+	defer srv.Close()
+
+	cache := filepath.Join(t.TempDir(), "dash.mp4")
+	st, err := openStreamingMP4(t.Context(), srv.URL, cache, 1000, int64(len(data)), 0)
+	if err != nil {
+		t.Fatalf("openStreamingMP4: %v", err)
+	}
+	defer st.Close()
+
+	if fullGetReqs.Load() != 0 {
+		t.Fatalf("saw %d full-GET requests, want 0", fullGetReqs.Load())
+	}
+	if rangeReqs.Load() < 2 {
+		t.Fatalf("range requests = %d, want >= 2", rangeReqs.Load())
+	}
+	if st.SampleRate() != 44100 || st.Channels() != 2 {
+		t.Fatalf("format = %dHz %dch, want 44100Hz 2ch", st.SampleRate(), st.Channels())
+	}
+
+	buf := make([]float32, 4096)
+	n, err := st.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("Read: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("Read returned 0 PCM samples")
+	}
 }

@@ -3,6 +3,7 @@ package ytmusic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -40,35 +41,42 @@ func podcastStream(videoID string, resp map[string]any) (*StreamInfo, error) {
 	if sd == nil {
 		return nil, ErrUnavailable
 	}
-	formats, _ := sd["formats"].([]any)
-	if len(formats) == 0 {
-		formats, _ = sd["adaptiveFormats"].([]any)
+	var sawHEAAC bool
+	for _, key := range []string{"formats", "adaptiveFormats"} {
+		formats, _ := sd[key].([]any)
+		for _, raw := range formats {
+			f, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			u, _ := f["url"].(string)
+			mime, _ := f["mimeType"].(string)
+			if u == "" || !strings.HasPrefix(mime, "audio/") || !isEnclosureURL(u) {
+				continue
+			}
+			if isHEAACMime(mime) {
+				sawHEAAC = true
+				continue
+			}
+			info := &StreamInfo{
+				VideoID:   videoID,
+				DirectURL: u,
+				Format:    "mp3",
+			}
+			if strings.Contains(mime, "mp4") || strings.Contains(mime, "m4a") {
+				info.Format = "mp4"
+			}
+			if dur, ok := f["approxDurationMs"].(string); ok {
+				info.DurationMs, _ = strconv.ParseInt(dur, 10, 64)
+			}
+			if cl, ok := f["contentLength"].(string); ok {
+				info.ContentLength, _ = strconv.ParseInt(cl, 10, 64)
+			}
+			return info, nil
+		}
 	}
-	for _, raw := range formats {
-		f, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		u, _ := f["url"].(string)
-		mime, _ := f["mimeType"].(string)
-		if u == "" || !strings.HasPrefix(mime, "audio/") || !isEnclosureURL(u) {
-			continue
-		}
-		info := &StreamInfo{
-			VideoID:   videoID,
-			DirectURL: u,
-			Format:    "mp3",
-		}
-		if strings.Contains(mime, "mp4") || strings.Contains(mime, "m4a") {
-			info.Format = "mp4"
-		}
-		if dur, ok := f["approxDurationMs"].(string); ok {
-			info.DurationMs, _ = strconv.ParseInt(dur, 10, 64)
-		}
-		if cl, ok := f["contentLength"].(string); ok {
-			info.ContentLength, _ = strconv.ParseInt(cl, 10, 64)
-		}
-		return info, nil
+	if sawHEAAC {
+		return nil, fmt.Errorf("%w: podcast enclosure uses HE-AAC", ErrUnsupportedCodec)
 	}
 	return nil, ErrUnavailable
 }
