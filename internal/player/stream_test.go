@@ -19,6 +19,7 @@ import (
 
 	aacpcm "github.com/tphakala/go-aac/pcm"
 	m4a "github.com/tphakala/go-m4a"
+	"github.com/tphakala/go-m4a/aacm4a"
 
 	"github.com/douglarek/melo/internal/ytmusic"
 )
@@ -552,24 +553,49 @@ func TestOpenStreamingMP4FragmentedDashRangeOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStreamingMP4: %v", err)
 	}
-	defer st.Close()
 
+	if st.SampleRate() != 44100 || st.Channels() != 2 {
+		_ = st.Close()
+		t.Fatalf("format = %dHz %dch, want 44100Hz 2ch", st.SampleRate(), st.Channels())
+	}
+
+	buf := make([]float32, 4096)
+	totalSamples := 0
+	for {
+		n, rerr := st.Read(buf)
+		totalSamples += n
+		if errors.Is(rerr, io.EOF) {
+			break
+		}
+		if rerr != nil {
+			_ = st.Close()
+			t.Fatalf("Read: %v", rerr)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if totalSamples == 0 {
+		t.Fatal("Read returned 0 PCM samples")
+	}
 	if fullGetReqs.Load() != 0 {
 		t.Fatalf("saw %d full-GET requests, want 0", fullGetReqs.Load())
 	}
 	if rangeReqs.Load() < 2 {
 		t.Fatalf("range requests = %d, want >= 2", rangeReqs.Load())
 	}
-	if st.SampleRate() != 44100 || st.Channels() != 2 {
-		t.Fatalf("format = %dHz %dch, want 44100Hz 2ch", st.SampleRate(), st.Channels())
-	}
 
-	buf := make([]float32, 4096)
-	n, err := st.Read(buf)
-	if err != nil && !errors.Is(err, io.EOF) {
-		t.Fatalf("Read: %v", err)
+	// Verify the same dash-style fragmented MP4 also decodes through aacm4a.NewSeekableDecoder
+	// (e.g. cached/resumeAt path).
+	dec, info, err := aacm4a.NewSeekableDecoder(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("aacm4a.NewSeekableDecoder: %v", err)
 	}
-	if n == 0 {
-		t.Fatal("Read returned 0 PCM samples")
+	if info.SampleRate != 44100 || info.Channels != 2 {
+		t.Fatalf("aacm4a info = %+v, want 44100Hz 2ch", info)
+	}
+	pcm := make([]byte, 4096)
+	if n, err := dec.Read(pcm); (err != nil && !errors.Is(err, io.EOF)) || n == 0 {
+		t.Fatalf("aacm4a Read = %d, %v; want PCM bytes", n, err)
 	}
 }

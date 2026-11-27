@@ -513,3 +513,31 @@ func TestResolveMusicRemainsSabrFirst(t *testing.T) {
 		t.Fatalf("ANDROID player was called %d times for normal song when SABR succeeded", androidCalls.Load())
 	}
 }
+
+func TestResolveMusicAndroidFallbackPrefersAdaptiveAACLC(t *testing.T) {
+	c := NewClient() // SABR not configured -> falls back to ANDROID player
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Host, "www.youtube.com") && strings.Contains(req.URL.Path, "player") {
+			body := `{
+				"playabilityStatus": {"status": "OK"},
+				"streamingData": {
+					"formats": [{"itag": 18, "url": "https://rr.googlevideo.com/18.mp4", "mimeType": "video/mp4"}],
+					"adaptiveFormats": [
+						{"itag": 139, "url": "https://rr.googlevideo.com/139.m4a", "mimeType": "audio/mp4; codecs=\"mp4a.40.5\""},
+						{"itag": 140, "url": "https://rr.googlevideo.com/140.m4a", "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "contentLength": "1234567", "audioSampleRate": "44100"}
+					]
+				}
+			}`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("{}")), Request: req}, nil
+	})}
+
+	info, err := c.ResolveStream(t.Context(), Track{ID: "song-fb", Podcast: false})
+	if err != nil {
+		t.Fatalf("ResolveStream: %v", err)
+	}
+	if info.Format != "mp4" || info.DirectURL != "https://rr.googlevideo.com/140.m4a" || info.Fallback {
+		t.Fatalf("got stream = %+v, want adaptive itag 140 with Fallback=false", info)
+	}
+}

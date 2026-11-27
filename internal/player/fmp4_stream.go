@@ -18,6 +18,7 @@ import (
 type fmp4Stream struct {
 	mu          sync.Mutex
 	sess        *ytmusic.SabrSession
+	closer      io.Closer
 	rd          *fmp4Reader
 	dec         *aacpcm.Decoder
 	sampleRate  int
@@ -138,6 +139,10 @@ func (s *fmp4Stream) SetPosition(frame int64) error {
 	return nil
 }
 
+func (s *fmp4Stream) Seekable() bool {
+	return s.rd != nil && s.rd.seekPoint != nil
+}
+
 func (s *fmp4Stream) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -148,6 +153,9 @@ func (s *fmp4Stream) Close() error {
 	s.mu.Unlock()
 	if s.sess != nil {
 		return s.sess.Close()
+	}
+	if s.closer != nil {
+		return s.closer.Close()
 	}
 	return nil
 }

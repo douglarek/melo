@@ -949,6 +949,42 @@ func (d *download) copyBody(r io.Reader) error {
 	}
 }
 
+func (d *download) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 {
+		return 0, errors.New("negative read offset")
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	end := off + int64(len(p))
+	d.mu.Lock()
+	for d.n < end && !d.done {
+		d.cond.Wait()
+	}
+	avail := d.n - off
+	err := d.err
+	d.mu.Unlock()
+
+	if avail <= 0 {
+		if err != nil {
+			return 0, err
+		}
+		return 0, io.EOF
+	}
+	toRead := int64(len(p))
+	if toRead > avail {
+		toRead = avail
+	}
+	n, rerr := d.file.ReadAt(p[:toRead], off)
+	if n < len(p) && rerr == nil {
+		if err != nil {
+			return n, err
+		}
+		return n, io.EOF
+	}
+	return n, rerr
+}
+
 type downloadReader struct {
 	d   *download
 	pos int64
@@ -1007,7 +1043,92 @@ func (r *downloadReader) Seek(offset int64, whence int) (int64, error) {
 	return newPos, nil
 }
 
-func openStreamingMP4(ctx context.Context, u string, cachePath string, durationMs int64, contentLength int64, resumeAt time.Duration) (*mp4Stream, error) {
+func detectFragmentedMP4Init(src io.ReaderAt, avail int64) (int64, bool) {
+	var hdr [16]byte
+	off := int64(0)
+	for range 32 {
+		if off+8 > avail {
+			return 0, false
+		}
+		n, err := src.ReadAt(hdr[:min(int64(len(hdr)), avail-off)], off)
+		if err != nil && n < 8 {
+			return 0, false
+		}
+		size := int64(binary.BigEndian.Uint32(hdr[0:4]))
+		typ := string(hdr[4:8])
+		boxHdr := int64(8)
+		if size == 1 {
+			if n < 16 {
+				return 0, false
+			}
+			raw := binary.BigEndian.Uint64(hdr[8:16])
+			if raw > math.MaxInt64 {
+				return 0, false
+			}
+			size = int64(raw)
+			boxHdr = 16
+		}
+		if size < boxHdr || size > maxFMP4MoofSize || off+size > avail {
+			return 0, false
+		}
+		switch typ {
+		case "moov":
+			body := make([]byte, size-boxHdr)
+			if _, err := src.ReadAt(body, off+boxHdr); err != nil {
+				return 0, false
+			}
+			hasMvex := false
+			_ = walkBoxes(body, 0, len(body), func(child string, _, _ int) error {
+				if child == "mvex" {
+					hasMvex = true
+				}
+				return nil
+			})
+			if hasMvex {
+				return off + size, true
+			}
+			return 0, false
+		case "moof":
+			return 0, false
+		}
+		off += size
+	}
+	return 0, false
+}
+
+func openStreamingFMP4(dl *download, contentLength, initLen, durationMs int64) (*fmp4Stream, error) {
+	rd, err := newFMP4Reader(dl, contentLength, 0, initLen, nil)
+	if err != nil {
+		return nil, err
+	}
+	dec, err := aacpcm.NewDecoder(rd, aacpcm.WithRawStream(rd.ASC()))
+	if err != nil {
+		return nil, err
+	}
+	sr := rd.init.sampleRate
+	if sr <= 0 {
+		sr = 44100
+	}
+	ch := rd.init.channels
+	if ch <= 0 {
+		ch = 2
+	}
+	var totalFrames int64
+	if durationMs > 0 {
+		totalFrames = durationMs * int64(sr) / 1000
+	}
+	return &fmp4Stream{
+		closer:      &downloadCloser{d: dl},
+		rd:          rd,
+		dec:         dec,
+		sampleRate:  sr,
+		channels:    ch,
+		totalFrames: totalFrames,
+		spectrum:    make([]float32, 16),
+	}, nil
+}
+
+func openStreamingMP4(ctx context.Context, u string, cachePath string, durationMs int64, contentLength int64, resumeAt time.Duration) (stream, error) {
 	// If already fully cached on disk:
 	if info, err := os.Stat(cachePath); err == nil && info.Size() > 0 {
 		if st, err := openMP4Stream(cachePath); err == nil {
@@ -1049,7 +1170,19 @@ func openStreamingMP4(ctx context.Context, u string, cachePath string, durationM
 		dl.close(true)
 		return nil, err
 	}
+	avail := dl.n
 	dl.mu.Unlock()
+
+	if contentLength > 0 {
+		if initLen, ok := detectFragmentedMP4Init(dl.file, avail); ok {
+			st, err := openStreamingFMP4(dl, contentLength, initLen, durationMs)
+			if err != nil {
+				dl.close(true)
+				return nil, err
+			}
+			return st, nil
+		}
+	}
 
 	r := &downloadReader{d: dl}
 	dec, info, err := aacm4a.NewSeekableDecoder(r)
