@@ -66,7 +66,7 @@ func relatedBrowseID(root map[string]any) string {
 func parseRelatedSections(root map[string]any) []Section {
 	var sections []Section
 	for _, shelf := range findCarouselShelves(root) {
-		header, _ := shelf["header"].(map[string]any)["musicCarouselShelfBasicHeaderRenderer"].(map[string]any)
+		header := navMap(shelf, "header", "musicCarouselShelfBasicHeaderRenderer")
 		title := RunsToString(header["title"])
 		rawItems, _ := shelf["contents"].([]any)
 

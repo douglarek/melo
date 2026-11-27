@@ -23,6 +23,9 @@ func (a *app) beginAuthAttempt() uint64 {
 	a.authMu.Lock()
 	defer a.authMu.Unlock()
 	a.authAttempt++
+	if ytmusic.CurrentSession() == nil {
+		ytmusic.DefaultClient.SetAuth("")
+	}
 	return a.authAttempt
 }
 
@@ -314,6 +317,7 @@ func (a *app) saveCookieSession(cookie string, attempt uint64) {
 			if !a.authAttemptIsCurrent(attempt) {
 				return
 			}
+			a.advanceAccount()
 			a.profile = prof
 			a.accountModalOpen = false
 			a.clearDefaultBrowserData()
@@ -342,6 +346,11 @@ func (a *app) signOut() {
 		a.authErr = locales.SignOutFailed()
 	}
 
+	a.advanceAccount()
+	if a.pl != nil {
+		a.pl.DetachFeed()
+	}
+
 	a.clearDefaultBrowserData()
 	if a.loginWin != nil {
 		a.loginWin.Close()
@@ -352,21 +361,37 @@ func (a *app) signOut() {
 	a.accountModalOpen = false
 	a.settingsModalOpen = false
 
-	// Clear authenticated library & personal data
+	// Clear authenticated library & all account-derived cached data
 	a.libraryPlaylists = nil
+	a.libraryItems = nil
+	a.libraryLoading = false
 	a.liked = nil
-	delete(a.playlists, "LM")
-	delete(a.playlists, "VLLM")
+	a.likedLoading = false
+	a.playlists = map[string]*ytmusic.Playlist{}
+	a.playlistRefreshing = map[string]bool{}
+	a.playlistFilling = map[string]bool{}
+	a.loadingMore = map[string]bool{}
 	a.deleteLibraryCache()
 
-	// Reset cached sections requested with user session
+	// Reset cached sections and pages requested with user session
 	a.homeSections = nil
 	a.homeLoading = false
 	a.exploreSections = nil
 	a.exploreLoading = false
 	a.chartsSections = nil
 	a.chartsLoading = false
+	a.chartCountries = nil
+	a.chartCountry = ""
+	a.chartsGen++
+	a.albums = map[string]*ytmusic.Album{}
+	a.artists = map[string]*ytmusic.Artist{}
 	a.searches = map[route]*ytmusic.SearchResult{}
+	a.categories = map[string]*ytmusic.Category{}
+	a.more = map[string]ytmusic.Section{}
+	a.relatedVideoID = ""
+	a.relatedSections = nil
+	a.relatedLoading = false
+	a.relatedLoaded = false
 
 	// Return to clean home view and reload public data
 	a.route = route{page: pageHome}

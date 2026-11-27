@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,6 +42,73 @@ var sessionFile = func() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "session.json"), nil
+}
+
+// SetTestSessionStore redirects session persistence and secret storage to a
+// temporary directory and in-memory secret store for tests, returning a restore
+// function.
+func SetTestSessionStore(dir string) func() {
+	sessionMu.Lock()
+	prevFile := sessionFile
+	prevGet := sessionSecretGet
+	prevSet := sessionSecretSet
+	prevDel := sessionSecretDelete
+	prevSess := currentSession
+
+	var secretMu sync.Mutex
+	var secretVal []byte
+
+	sessionFile = func() (string, error) {
+		return filepath.Join(dir, "session.json"), nil
+	}
+	sessionSecretGet = func() ([]byte, error) {
+		secretMu.Lock()
+		defer secretMu.Unlock()
+		if len(secretVal) == 0 {
+			return nil, os.ErrNotExist
+		}
+		out := make([]byte, len(secretVal))
+		copy(out, secretVal)
+		return out, nil
+	}
+	sessionSecretSet = func(v []byte) error {
+		secretMu.Lock()
+		defer secretMu.Unlock()
+		out := make([]byte, len(v))
+		copy(out, v)
+		secretVal = out
+		return nil
+	}
+	sessionSecretDelete = func() error {
+		secretMu.Lock()
+		defer secretMu.Unlock()
+		secretVal = nil
+		return nil
+	}
+	currentSession = nil
+	sessionGen++
+	DefaultClient.mu.Lock()
+	DefaultClient.setAuthLocked("")
+	DefaultClient.mu.Unlock()
+	sessionMu.Unlock()
+
+	return func() {
+		sessionMu.Lock()
+		sessionFile = prevFile
+		sessionSecretGet = prevGet
+		sessionSecretSet = prevSet
+		sessionSecretDelete = prevDel
+		currentSession = prevSess
+		sessionGen++
+		var cookie string
+		if prevSess != nil {
+			cookie = prevSess.Cookie
+		}
+		DefaultClient.mu.Lock()
+		DefaultClient.setAuthLocked(cookie)
+		DefaultClient.mu.Unlock()
+		sessionMu.Unlock()
+	}
 }
 
 func readSessionBytes() ([]byte, error) {
@@ -127,23 +195,36 @@ func writeSession(sess *SessionData) error {
 
 // SaveSession persists session data and makes it current.
 func SaveSession(sess *SessionData) error {
-	sessionMu.Lock()
-	defer sessionMu.Unlock()
 	if sess == nil {
 		return errors.New("ytmusic: nil session")
 	}
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	DefaultClient.mu.Lock()
+	defer DefaultClient.mu.Unlock()
 
 	clone := cloneSession(sess)
+	if clone.Cookie != "" && DefaultClient.cookie != "" && (clone.Cookie == DefaultClient.authOwner || clone.Cookie == DefaultClient.cookie) {
+		clone.Cookie = DefaultClient.cookie
+	}
 	if err := writeSession(clone); err != nil {
 		return err
 	}
 	currentSession = clone
 	sessionGen++
+	DefaultClient.setAuthLocked(clone.Cookie)
 	return nil
 }
 
 // LoadSession restores saved session data.
 func LoadSession() (*SessionData, error) {
+	sessionMu.RLock()
+	sGen := sessionGen
+	DefaultClient.mu.RLock()
+	authGen := DefaultClient.authGen
+	DefaultClient.mu.RUnlock()
+	sessionMu.RUnlock()
+
 	b, err := readSessionBytes()
 	if err != nil || len(b) == 0 {
 		return nil, errors.New("no saved session")
@@ -154,40 +235,53 @@ func LoadSession() (*SessionData, error) {
 		return nil, err
 	}
 
-	if sess.Cookie != "" {
-		if len(sess.Cookie) <= mygo.MaxSecretSize {
-			if err := sessionSecretSet([]byte(sess.Cookie)); err == nil {
-				stripped := cloneSession(&sess)
-				stripped.Cookie = ""
-				if b, err := json.Marshal(stripped); err == nil {
-					_ = writeSessionBytes(b)
-				}
-			}
+	fromFile := sess.Cookie != ""
+	if !fromFile {
+		if secret, err := sessionSecretGet(); err == nil && len(secret) > 0 {
+			sess.Cookie = string(secret)
 		}
-	} else if secret, err := sessionSecretGet(); err == nil && len(secret) > 0 {
-		sess.Cookie = string(secret)
+	}
+
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	DefaultClient.mu.Lock()
+	defer DefaultClient.mu.Unlock()
+
+	if sessionGen != sGen || DefaultClient.authGen != authGen {
+		return nil, ErrSessionStale
 	}
 	if sess.Cookie == "" {
 		return nil, errors.New("no saved session")
 	}
 
-	sessionMu.Lock()
+	if fromFile && len(sess.Cookie) <= mygo.MaxSecretSize {
+		if err := sessionSecretSet([]byte(sess.Cookie)); err == nil {
+			stripped := cloneSession(&sess)
+			stripped.Cookie = ""
+			if b, err := json.Marshal(stripped); err == nil {
+				_ = writeSessionBytes(b)
+			}
+		}
+	}
+
 	currentSession = cloneSession(&sess)
 	sessionGen++
-	sessionMu.Unlock()
+	DefaultClient.setAuthLocked(sess.Cookie)
 
-	DefaultClient.SetAuth(sess.Cookie)
 	return cloneSession(&sess), nil
 }
 
 // ClearSession clears the in-memory session and removes the persisted file.
 func ClearSession() error {
 	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
 	currentSession = nil
 	sessionGen++
-	sessionMu.Unlock()
+	DefaultClient.mu.Lock()
+	DefaultClient.setAuthLocked("")
+	DefaultClient.mu.Unlock()
 
-	DefaultClient.SetAuth("")
 	_ = sessionSecretDelete()
 	return deleteSessionBytes()
 }
@@ -232,6 +326,50 @@ func UpdateSessionCookie(gen uint64, cookie string) error {
 	}
 	currentSession = clone
 	return nil
+}
+
+func (c *Client) applyRefreshedCookies(setCookies []*http.Cookie, sentCookie string, authGen, sGen uint64, hasSession bool) {
+	if len(setCookies) == 0 || sentCookie == "" {
+		return
+	}
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	if hasSession {
+		if currentSession == nil || sessionGen != sGen {
+			return
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.authGen != authGen {
+			return
+		}
+		merged := mergeCookies(currentSession.Cookie, setCookies)
+		if merged == currentSession.Cookie {
+			return
+		}
+		clone := cloneSession(currentSession)
+		clone.Cookie = merged
+		if err := writeSession(clone); err != nil {
+			return
+		}
+		currentSession = clone
+		c.cookie = merged
+		return
+	}
+
+	// No saved session existed when the request started (such as an in-flight
+	// login verification before SaveSession). Refuse to overwrite if a saved
+	// session has appeared or client credentials changed.
+	if currentSession != nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.authGen != authGen || c.cookie == "" {
+		return
+	}
+	c.cookie = mergeCookies(c.cookie, setCookies)
 }
 
 // Account fetches the logged-in user profile from YouTube Music.

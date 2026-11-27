@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -144,12 +143,13 @@ func (a *app) loadChartsCountry(c *ui.Context) {
 	code := a.chartCountry
 	a.chartsGen++
 	gen := a.chartsGen
+	accGen, accCtx := a.currentAccount()
 	a.chartsLoading = true
 	c.Invalidate()
 	go func() {
-		page, _ := ytmusic.DefaultClient.BrowseChartsPage(context.Background(), code)
+		page, _ := ytmusic.DefaultClient.BrowseChartsPage(accCtx, code)
 		a.post(func() {
-			if gen != a.chartsGen {
+			if !a.isAccountCurrent(accGen) || gen != a.chartsGen {
 				return
 			}
 			a.chartsLoading = false

@@ -67,6 +67,7 @@ type route struct {
 type app struct {
 	mu       sync.Mutex
 	win      *mygo.Window
+	postFn   func(func())
 	pl       *player.Player
 	art      *artCache
 	artPins  map[string]bool
@@ -97,9 +98,13 @@ type app struct {
 	saveTimer *time.Timer
 
 	// Application lifetime
-	ctx    context.Context
-	cancel context.CancelFunc
-	pot    *potProvider
+	ctx           context.Context
+	cancel        context.CancelFunc
+	accountMu     sync.Mutex
+	accountGen    uint64
+	accountCtx    context.Context
+	accountCancel context.CancelFunc
+	pot           *potProvider
 
 	// Settings modal
 	settingsModalOpen bool
@@ -148,6 +153,8 @@ type app struct {
 	libraryPlaylists   []ytmusic.PlaylistItem
 	playlistRefreshing map[string]bool
 	playlistFilling    map[string]bool
+	playlistGen        map[string]uint64
+	playlistSeq        uint64
 	libraryItems       []ytmusic.CardItem
 	libraryLoading     bool
 	libraryFilter      string
@@ -190,7 +197,62 @@ type app struct {
 	notifySeq         atomic.Int64
 }
 
+func (a *app) currentAccount() (uint64, context.Context) {
+	a.accountMu.Lock()
+	defer a.accountMu.Unlock()
+	if a.accountCtx == nil {
+		parent := a.ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		a.accountCtx, a.accountCancel = context.WithCancel(parent)
+	}
+	return a.accountGen, a.accountCtx
+}
+
+func (a *app) isAccountCurrent(gen uint64) bool {
+	a.accountMu.Lock()
+	defer a.accountMu.Unlock()
+	return a.accountGen == gen
+}
+
+func (a *app) advanceAccount() uint64 {
+	a.accountMu.Lock()
+	defer a.accountMu.Unlock()
+	a.accountGen++
+	if a.accountCancel != nil {
+		a.accountCancel()
+	}
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	a.accountCtx, a.accountCancel = context.WithCancel(parent)
+	return a.accountGen
+}
+
+func (a *app) nextPlaylistGen(key string) uint64 {
+	if a.playlistGen == nil {
+		a.playlistGen = map[string]uint64{}
+	}
+	a.playlistSeq++
+	a.playlistGen[key] = a.playlistSeq
+	return a.playlistSeq
+}
+
+func (a *app) currentPlaylistGen(key string) uint64 {
+	return a.playlistGen[key]
+}
+
+func (a *app) isPlaylistGenCurrent(key string, gen uint64) bool {
+	return a.playlistGen[key] == gen
+}
+
 func (a *app) post(fn func()) {
+	if a.postFn != nil {
+		a.postFn(fn)
+		return
+	}
 	if a.win == nil {
 		return
 	}
@@ -330,8 +392,9 @@ func Run() error {
 			if a.cancel != nil {
 				a.cancel()
 			}
+			a.advanceAccount()
 			if a.pl != nil {
-				_ = a.pl.Close()
+				a.pl.CloseAsync()
 			}
 			if a.tray != nil {
 				a.tray.Destroy()
@@ -351,14 +414,22 @@ func Run() error {
 		go a.updateLoop(a.ctx)
 	})
 
-	return mygo.App.Run()
+	err := mygo.App.Run()
+	if a.pl != nil {
+		a.pl.Wait()
+		if a.pl.Cache != nil && a.pl.Cache.Limit() == 0 {
+			a.pl.Cache.Clear()
+		}
+	}
+	return err
 }
 
 func (a *app) boot() {
+	gen, acctCtx := a.currentAccount()
 	a.homeLoading = true
 	go func() {
 		// Restore user session
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(acctCtx, 10*time.Second)
 		defer cancel()
 
 		sess, err := ytmusic.LoadSession()
@@ -376,14 +447,14 @@ func (a *app) boot() {
 		home, _ := ytmusic.DefaultClient.BrowseHome(ctx)
 
 		a.post(func() {
+			if !a.isAccountCurrent(gen) {
+				return
+			}
 			a.profile = prof
 			if a.profile != nil {
 				a.restoreLibraryCache()
 				a.loadLibrary()
 			}
-		})
-
-		a.post(func() {
 			a.homeSections = home
 			a.homeLoading = false
 		})
@@ -394,9 +465,10 @@ func (a *app) loadLibrary() {
 	if a.profile == nil {
 		return
 	}
+	gen, acctCtx := a.currentAccount()
 	a.libraryLoading = true
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(acctCtx, 15*time.Second)
 		defer cancel()
 
 		playlists, _ := ytmusic.DefaultClient.BrowseLibraryPlaylists(ctx)
@@ -404,6 +476,9 @@ func (a *app) loadLibrary() {
 		liked, _ := ytmusic.DefaultClient.BrowseLikedSongs(ctx)
 
 		a.post(func() {
+			if !a.isAccountCurrent(gen) || a.profile == nil {
+				return
+			}
 			a.libraryLoading = false
 			updated := false
 			if len(playlists) > 0 {
@@ -548,7 +623,7 @@ func sameSong(a, b ytmusic.Track) bool {
 }
 
 func (a *app) loadCurrentRoute() {
-	ctx := context.Background()
+	accGen, ctx := a.currentAccount()
 	switch a.route.page {
 	case pageHome:
 		if len(a.homeSections) == 0 && !a.homeLoading {
@@ -556,6 +631,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				sec, _ := ytmusic.DefaultClient.BrowseHome(ctx)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					a.homeSections = sec
 					a.homeLoading = false
 				})
@@ -567,6 +645,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				sec, _ := ytmusic.DefaultClient.BrowseExplore(ctx)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					a.exploreSections = sec
 					a.exploreLoading = false
 				})
@@ -574,10 +655,14 @@ func (a *app) loadCurrentRoute() {
 		}
 	case pageCharts:
 		if len(a.chartsSections) == 0 && !a.chartsLoading {
+			chartsGen := a.chartsGen
 			a.chartsLoading = true
 			go func() {
 				page, _ := ytmusic.DefaultClient.BrowseChartsPage(ctx, "")
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) || chartsGen != a.chartsGen {
+						return
+					}
 					if page != nil {
 						a.chartsSections = page.Sections
 						a.chartCountries = page.Countries
@@ -599,12 +684,26 @@ func (a *app) loadCurrentRoute() {
 		if a.playlistFilling == nil {
 			a.playlistFilling = map[string]bool{}
 		}
+		plGen := a.nextPlaylistGen(id)
 		a.playlistRefreshing[id] = true
 		a.playlistFilling[id] = true
+		a.loadingMore[id] = false
 		go func() {
 			pl, _ := ytmusic.DefaultClient.BrowsePlaylist(ctx, id)
-			hasMore := pl != nil && pl.Continuation != ""
+			var cont string
+			var seen map[string]bool
+			if pl != nil {
+				cont = pl.Continuation
+				seen = make(map[string]bool, len(pl.Tracks))
+				for _, t := range pl.Tracks {
+					seen[t.ID] = true
+				}
+			}
+			hasMore := cont != ""
 			a.post(func() {
+				if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(id, plGen) {
+					return
+				}
 				a.playlistRefreshing[id] = false
 				if !hasMore {
 					a.playlistFilling[id] = false
@@ -617,23 +716,46 @@ func (a *app) loadCurrentRoute() {
 			if !hasMore {
 				return
 			}
-			for pl.Continuation != "" && len(pl.Tracks) < 1000 {
-				more, next, err := ytmusic.DefaultClient.PlaylistTracks(ctx, pl.Continuation)
+			for cont != "" && len(seen) < 1000 {
+				if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(id, plGen) {
+					return
+				}
+				more, next, err := ytmusic.DefaultClient.PlaylistTracks(ctx, cont)
 				if err != nil {
 					break
 				}
-				pl.Tracks = append(pl.Tracks, more...)
-				pl.Continuation = next
+				added := 0
+				for _, t := range more {
+					if !seen[t.ID] {
+						seen[t.ID] = true
+						added++
+					}
+				}
+				if next == cont {
+					next = ""
+				}
+				cont = next
 				page := more
+				nextTok := next
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(id, plGen) {
+						return
+					}
 					if p := a.playlists[id]; p != nil {
-						p.Tracks = appendUniqueTracks(p.Tracks, page)
-						p.Continuation = next
+						applyPlaylistPage(p, page, nextTok)
 					}
 					a.reconcileQueue(&ytmusic.Playlist{Tracks: page})
 				})
+				if added == 0 {
+					break
+				}
 			}
-			a.post(func() { a.playlistFilling[id] = false })
+			a.post(func() {
+				if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(id, plGen) {
+					return
+				}
+				a.playlistFilling[id] = false
+			})
 		}()
 	case pageAlbum:
 		id := a.route.id
@@ -641,6 +763,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				al, _ := ytmusic.DefaultClient.BrowseAlbum(ctx, id)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					if al != nil {
 						a.albums[id] = al
 					}
@@ -653,6 +778,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				art, _ := ytmusic.DefaultClient.BrowseArtist(ctx, id)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					if art != nil {
 						a.artists[id] = art
 					}
@@ -666,10 +794,14 @@ func (a *app) loadCurrentRoute() {
 		if a.playlists[key] != nil || a.loadingMore[key] || art == nil || art.SongsID == "" {
 			return
 		}
+		plGen := a.nextPlaylistGen(key)
 		a.loadingMore[key] = true
 		go func(browseID, params string) {
 			songs, _ := ytmusic.DefaultClient.BrowseArtistSongs(ctx, browseID, params)
 			a.post(func() {
+				if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(key, plGen) {
+					return
+				}
 				a.loadingMore[key] = false
 				if songs == nil {
 					songs = &ytmusic.Playlist{ID: browseID}
@@ -683,6 +815,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				res, _ := ytmusic.DefaultClient.Search(ctx, r.query, r.kind)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					if res != nil {
 						a.searches[r] = res
 					}
@@ -698,6 +833,9 @@ func (a *app) loadCurrentRoute() {
 			go func() {
 				cat, _ := ytmusic.DefaultClient.BrowseCategory(ctx, id, params)
 				a.post(func() {
+					if !a.isAccountCurrent(accGen) {
+						return
+					}
 					if cat != nil {
 						a.categories[key] = cat
 					}
@@ -761,13 +899,14 @@ func (a *app) syncNowPlayingLyrics() {
 		return
 	}
 
+	accGen, accCtx := a.currentAccount()
 	go func(t ytmusic.Track) {
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		ctx, cancel := context.WithTimeout(accCtx, 12*time.Second)
 		defer cancel()
 
 		setLyrics := func(l *ytmusic.Lyrics) {
 			a.post(func() {
-				if a.lyricsLastVideoID == t.ID {
+				if a.isAccountCurrent(accGen) && a.lyricsLastVideoID == t.ID {
 					a.lyrics = l
 					a.lyricsLoading = false
 				}
@@ -811,7 +950,7 @@ func (a *app) syncNowPlayingLyrics() {
 			return
 		}
 		a.post(func() {
-			if a.lyricsLastVideoID == t.ID {
+			if a.isAccountCurrent(accGen) && a.lyricsLastVideoID == t.ID {
 				a.lyricsLoading = false
 			}
 		})
@@ -819,13 +958,14 @@ func (a *app) syncNowPlayingLyrics() {
 }
 
 func (a *app) toggleLike(track ytmusic.Track) {
+	_, accCtx := a.currentAccount()
 	for i, t := range a.liked {
 		if t.ID == track.ID {
 			a.liked = append(a.liked[:i], a.liked[i+1:]...)
 			a.saveLibraryCache()
 			if a.profile != nil {
 				go func(id string) {
-					ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+					ctx, cancel := context.WithTimeout(accCtx, 8*time.Second)
 					defer cancel()
 					_ = ytmusic.DefaultClient.UnlikeSong(ctx, id)
 				}(track.ID)
@@ -843,7 +983,7 @@ func (a *app) toggleLike(track ytmusic.Track) {
 	a.saveLibraryCache()
 	if a.profile != nil {
 		go func(id string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			ctx, cancel := context.WithTimeout(accCtx, 8*time.Second)
 			defer cancel()
 			_ = ytmusic.DefaultClient.LikeSong(ctx, id)
 		}(track.ID)
@@ -937,28 +1077,24 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 	}
 
 	token := pl.Continuation
+	accGen, accCtx := a.currentAccount()
+	plGen := a.currentPlaylistGen(key)
 	a.loadingMore[key] = true
 	c.Invalidate()
 
 	go func() {
-		tracks, next, err := ytmusic.DefaultClient.PlaylistTracks(context.Background(), token)
+		tracks, next, err := ytmusic.DefaultClient.PlaylistTracks(accCtx, token)
 		a.post(func() {
+			if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(key, plGen) {
+				return
+			}
 			a.loadingMore[key] = false
 			if err != nil {
 				return
 			}
 			added := 0
 			if p := a.playlists[key]; p != nil {
-				before := len(p.Tracks)
-				p.Tracks = appendUniqueTracks(p.Tracks, tracks)
-				added = len(p.Tracks) - before
-				p.Continuation = next
-				if p.TrackCount < len(p.Tracks) {
-					p.TrackCount = len(p.Tracks)
-				}
-				if added == 0 {
-					p.Continuation = ""
-				}
+				added = applyPlaylistPage(p, tracks, next)
 			}
 			a.reconcileQueue(&ytmusic.Playlist{Tracks: tracks})
 			if key == "LM" {
@@ -966,6 +1102,15 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 				a.liked = appendUniqueTracks(a.liked, tracks)
 				if len(a.liked) > before {
 					added++
+					if p := a.playlists[key]; p != nil {
+						if p.Continuation == "" {
+							if p.TrackCount == 0 || p.TrackCount < len(a.liked) {
+								p.TrackCount = len(a.liked)
+							}
+						} else if p.TrackCount > 0 && len(a.liked) >= p.TrackCount {
+							p.TrackCount = 0
+						}
+					}
 				}
 			}
 			if added == 0 {
@@ -975,6 +1120,29 @@ func (a *app) maybeLoadMorePlaylist(c *ui.Context) {
 			}
 		})
 	}()
+}
+
+// applyPlaylistPage merges a fetched page of tracks into p while preserving
+// unknown (0) vs known (>0) total semantics: an unknown total stays 0 until
+// the continuation runs out, an understated positive total falls back to 0 when
+// more pages remain, and completing pagination settles TrackCount to the actual
+// loaded count.
+func applyPlaylistPage(p *ytmusic.Playlist, tracks []ytmusic.Track, next string) int {
+	before := len(p.Tracks)
+	p.Tracks = appendUniqueTracks(p.Tracks, tracks)
+	added := len(p.Tracks) - before
+	p.Continuation = next
+	if added == 0 {
+		p.Continuation = ""
+	}
+	if p.Continuation == "" {
+		if p.TrackCount == 0 || p.TrackCount < len(p.Tracks) {
+			p.TrackCount = len(p.Tracks)
+		}
+	} else if p.TrackCount > 0 && len(p.Tracks) >= p.TrackCount {
+		p.TrackCount = 0
+	}
+	return added
 }
 
 func appendUniqueTracks(dst, src []ytmusic.Track) []ytmusic.Track {
@@ -1010,25 +1178,26 @@ func (a *app) playListAt(key string, tracks []ytmusic.Track, at int) {
 		return
 	}
 	token := pl.Continuation
+	accGen, accCtx := a.currentAccount()
+	plGen := a.currentPlaylistGen(key)
 	a.pl.AttachFeed(func(got func([]ytmusic.Track)) {
-		if token == "" {
+		if token == "" || !a.isAccountCurrent(accGen) {
 			got(nil)
 			return
 		}
-		more, next, err := ytmusic.DefaultClient.PlaylistTracks(context.Background(), token)
-		if err != nil {
+		more, next, err := ytmusic.DefaultClient.PlaylistTracks(accCtx, token)
+		if err != nil || !a.isAccountCurrent(accGen) {
 			got(nil)
 			return
 		}
 		token = next
 		got(more)
 		a.post(func() {
+			if !a.isAccountCurrent(accGen) || !a.isPlaylistGenCurrent(key, plGen) {
+				return
+			}
 			if p := a.playlists[key]; p != nil {
-				p.Tracks = appendUniqueTracks(p.Tracks, more)
-				p.Continuation = next
-				if p.TrackCount < len(p.Tracks) {
-					p.TrackCount = len(p.Tracks)
-				}
+				applyPlaylistPage(p, more, next)
 			}
 			if key == "LM" {
 				a.liked = appendUniqueTracks(a.liked, more)
@@ -1068,12 +1237,16 @@ func (a *app) loadLiked() {
 	if pl := a.playlists["LM"]; pl != nil && len(pl.Tracks) > 0 {
 		return
 	}
+	accGen, accCtx := a.currentAccount()
 	a.likedLoading = true
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(accCtx, 15*time.Second)
 		defer cancel()
 		liked, _ := browseLikedSongs(ctx)
 		a.post(func() {
+			if !a.isAccountCurrent(accGen) || a.profile == nil {
+				return
+			}
 			a.likedLoading = false
 			if liked == nil {
 				return

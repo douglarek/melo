@@ -105,30 +105,30 @@ func parseChartCountries(root map[string]any) ([]ChartCountry, string) {
 		return nil, ""
 	}
 	tab0, _ := tabs[0].(map[string]any)
-	sectionList, _ := tab0["tabRenderer"].(map[string]any)["content"].(map[string]any)["sectionListRenderer"].(map[string]any)
+	sectionList := navMap(asMap(tab0["tabRenderer"]), "content", "sectionListRenderer")
 	rawSections, _ := sectionList["contents"].([]any)
 	if len(rawSections) == 0 {
 		return nil, ""
 	}
 
-	shelf, _ := rawSections[0].(map[string]any)["musicShelfRenderer"].(map[string]any)
+	shelf := navMap(asMap(rawSections[0]), "musicShelfRenderer")
 	subheaders, _ := shelf["subheaders"].([]any)
 	if len(subheaders) == 0 {
 		return nil, ""
 	}
-	startItems, _ := subheaders[0].(map[string]any)["musicSideAlignedItemRenderer"].(map[string]any)["startItems"].([]any)
+	startItems := navSlice(asMap(subheaders[0]), "musicSideAlignedItemRenderer", "startItems")
 	if len(startItems) == 0 {
 		return nil, ""
 	}
-	button, _ := startItems[0].(map[string]any)["musicSortFilterButtonRenderer"].(map[string]any)
-	menu, _ := button["menu"].(map[string]any)["musicMultiSelectMenuRenderer"].(map[string]any)
+	button := navMap(asMap(startItems[0]), "musicSortFilterButtonRenderer")
+	menu := navMap(button, "menu", "musicMultiSelectMenuRenderer")
 	options, _ := menu["options"].([]any)
 
 	codes, selected := chartCountryTokens(root)
 	selectedCode := ""
 	countries := make([]ChartCountry, 0, len(options))
 	for _, raw := range options {
-		option, _ := raw.(map[string]any)["musicMultiSelectMenuItemRenderer"].(map[string]any)
+		option := navMap(asMap(raw), "musicMultiSelectMenuItemRenderer")
 		if option == nil {
 			continue
 		}
@@ -157,7 +157,7 @@ func chartCountryTokens(root map[string]any) (map[string]string, string) {
 	selected := ""
 	for _, raw := range mutations {
 		mutation, _ := raw.(map[string]any)
-		choice, _ := mutation["payload"].(map[string]any)["musicFormBooleanChoice"].(map[string]any)
+		choice := navMap(mutation, "payload", "musicFormBooleanChoice")
 		code, _ := choice["opaqueToken"].(string)
 		if code == "" {
 			continue
@@ -183,7 +183,7 @@ func parseSections(root map[string]any) []Section {
 	}
 
 	tab0, _ := tabs[0].(map[string]any)
-	sectionList, _ := tab0["tabRenderer"].(map[string]any)["content"].(map[string]any)["sectionListRenderer"].(map[string]any)
+	sectionList := navMap(asMap(tab0["tabRenderer"]), "content", "sectionListRenderer")
 	rawSections, _ := sectionList["contents"].([]any)
 
 	for _, rs := range rawSections {
@@ -229,7 +229,7 @@ func parseSections(root map[string]any) []Section {
 			continue
 		}
 
-		header, _ := car["header"].(map[string]any)["musicCarouselShelfBasicHeaderRenderer"].(map[string]any)
+		header := navMap(car, "header", "musicCarouselShelfBasicHeaderRenderer")
 		title := RunsToString(header["title"])
 		cList, _ := car["contents"].([]any)
 		items := parseCarouselContents(cList)
@@ -478,7 +478,7 @@ func parseResponsiveAsCard(r map[string]any) CardItem {
 	if browseID == "" && len(flexCols) > 0 {
 		col0, _ := flexCols[0].(map[string]any)
 		col0Flex, _ := col0["musicResponsiveListItemFlexColumnRenderer"].(map[string]any)
-		if runs, ok := col0Flex["text"].(map[string]any)["runs"].([]any); ok && len(runs) > 0 {
+		if runs := navSlice(col0Flex, "text", "runs"); len(runs) > 0 {
 			if run0, ok := runs[0].(map[string]any); ok {
 				nav, _ := run0["navigationEndpoint"].(map[string]any)
 				be, _ := nav["browseEndpoint"].(map[string]any)
@@ -605,7 +605,7 @@ func (c *Client) BrowsePlaylist(ctx context.Context, playlistID string) (*Playli
 		appendPlaylistItem(pl, item)
 	}
 	pl.Continuation = continuation
-	if pl.TrackCount == 0 {
+	if pl.TrackCount == 0 && continuation == "" {
 		pl.TrackCount = len(pl.Tracks)
 	}
 	// A show's page is browsed as a playlist, but it lists episodes. Say so,
@@ -883,7 +883,7 @@ func parseTrackFromListItem(r map[string]any) Track {
 	if len(flexCols) > 1 {
 		col1, _ := flexCols[1].(map[string]any)
 		col1Flex, _ := col1["musicResponsiveListItemFlexColumnRenderer"].(map[string]any)
-		col1Runs, _ := col1Flex["text"].(map[string]any)["runs"].([]any)
+		col1Runs := navSlice(col1Flex, "text", "runs")
 		artists = extractArtistsFromRuns(col1Runs)
 	}
 	if len(flexCols) > 2 {
@@ -986,16 +986,17 @@ func parseAlbumResponse(data []byte, albumID string) (*Album, error) {
 	sectionList, _ := secondaryContents["sectionListRenderer"].(map[string]any)
 	secList, _ := sectionList["contents"].([]any)
 	for _, s := range secList {
-		shelf, _ := s.(map[string]any)["musicShelfRenderer"].(map[string]any)
+		sm := asMap(s)
+		shelf := asMap(sm["musicShelfRenderer"])
 		if shelf == nil {
-			shelf, _ = s.(map[string]any)["musicPlaylistShelfRenderer"].(map[string]any)
+			shelf = asMap(sm["musicPlaylistShelfRenderer"])
 		}
 		if shelf == nil {
 			continue
 		}
 		rawTracks, _ := shelf["contents"].([]any)
 		for _, item := range rawTracks {
-			r, _ := item.(map[string]any)["musicResponsiveListItemRenderer"].(map[string]any)
+			r := navMap(asMap(item), "musicResponsiveListItemRenderer")
 			if r != nil {
 				track := parseTrackFromListItem(r)
 				if track.ID != "" {
@@ -1290,7 +1291,7 @@ func tabSections(raw any) []any {
 // response's contents, for both the single- and two-column layouts.
 func listShelf(contents map[string]any) ([]any, string) {
 	if tc, ok := contents["twoColumnBrowseResultsRenderer"].(map[string]any); ok {
-		sec, _ := tc["secondaryContents"].(map[string]any)["sectionListRenderer"].(map[string]any)["contents"].([]any)
+		sec := navSlice(tc, "secondaryContents", "sectionListRenderer", "contents")
 		return findShelfContents(sec)
 	}
 	if sc, ok := contents["singleColumnBrowseResultsRenderer"].(map[string]any); ok {
@@ -1562,7 +1563,7 @@ func (c *Client) BrowseLibrary(ctx context.Context) ([]CardItem, error) {
 // BrowseLikedSongs retrieves the authenticated user's Liked Music playlist.
 func (c *Client) BrowseLikedSongs(ctx context.Context) (*Playlist, error) {
 	pl, err := c.BrowsePlaylist(ctx, "VLLM")
-	if err != nil || len(pl.Tracks) == 0 {
+	if err != nil || pl == nil || len(pl.Tracks) == 0 {
 		return c.BrowsePlaylist(ctx, "LM")
 	}
 	return pl, nil

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -19,6 +21,11 @@ import (
 	"github.com/tphakala/go-m4a/aacm4a"
 
 	"github.com/douglarek/melo/internal/ytmusic"
+)
+
+const (
+	hlsPrefetchWindow  = 4
+	maxHLSSegmentBytes = 16 << 20
 )
 
 type stream interface {
@@ -41,14 +48,18 @@ type hlsStream struct {
 	curFrame    int64
 
 	// Segments state
-	segments    []ytmusic.StreamSegment
-	segData     [][]byte
-	segErr      []error
-	segDone     []chan struct{}
-	downloading map[int]bool
-	cancel      context.CancelFunc
-	ctx         context.Context
-	closeOnce   sync.Once
+	segments     []ytmusic.StreamSegment
+	segData      [][]byte
+	segErr       []error
+	segDone      []chan struct{}
+	downloading  map[int]bool
+	curSeg       int
+	prefetchPos  int
+	closed       bool
+	prefetchCond *sync.Cond
+	cancel       context.CancelFunc
+	ctx          context.Context
+	closeOnce    sync.Once
 
 	// Audio decoder
 	cacheHit  bool
@@ -89,6 +100,7 @@ func openHLSStream(ctx context.Context, info *ytmusic.StreamInfo, cache *Cache) 
 	for i := range s.segDone {
 		s.segDone[i] = make(chan struct{})
 	}
+	s.prefetchCond = sync.NewCond(&s.mu)
 
 	// Cached audio is decoded from memory; seeking rebuilds the decoder and
 	// discards frames before the target.
@@ -156,18 +168,49 @@ func (s *hlsStream) setDecoderInfo(info aacpcm.Info, cached *ytmusic.StreamInfo)
 }
 
 func (s *hlsStream) fetchSegment(idx int) error {
-	s.mu.Lock()
-	if idx < 0 || idx >= len(s.segments) || s.segData[idx] != nil || s.downloading[idx] {
+	var segURI string
+	for {
+		s.mu.Lock()
+		if idx < 0 || idx >= len(s.segments) {
+			s.mu.Unlock()
+			return nil
+		}
+		if s.closed || s.ctx.Err() != nil {
+			s.mu.Unlock()
+			if err := s.ctx.Err(); err != nil {
+				return err
+			}
+			return errors.New("hls: stream closed")
+		}
+		if s.segData[idx] != nil {
+			s.mu.Unlock()
+			return nil
+		}
+		if err := s.segErr[idx]; err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		if s.downloading[idx] {
+			done := s.segDone[idx]
+			s.mu.Unlock()
+			if done == nil {
+				continue
+			}
+			select {
+			case <-s.ctx.Done():
+				return s.ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		if s.segDone[idx] == nil {
+			s.segDone[idx] = make(chan struct{})
+		}
+		s.downloading[idx] = true
+		segURI = s.segments[idx].URI
 		s.mu.Unlock()
-		return nil
+		break
 	}
-	if err := s.segErr[idx]; err != nil {
-		s.mu.Unlock()
-		return err
-	}
-	s.downloading[idx] = true
-	segURI := s.segments[idx].URI
-	s.mu.Unlock()
 
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, segURI, nil)
 	if err != nil {
@@ -190,8 +233,13 @@ func (s *hlsStream) fetchSegment(idx int) error {
 		return err
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxHLSSegmentBytes+1))
 	if err != nil {
+		s.failSegment(idx, err)
+		return err
+	}
+	if len(data) > maxHLSSegmentBytes {
+		err := fmt.Errorf("hls: segment %d exceeds %d bytes", idx, maxHLSSegmentBytes)
 		s.failSegment(idx, err)
 		return err
 	}
@@ -241,41 +289,91 @@ func stripID3(data []byte) []byte {
 }
 
 func (s *hlsStream) prefetchAll() {
-	for i := range s.segments {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-			if err := s.fetchSegment(i); err != nil {
-				return
+	var tmpFile *os.File
+	var tmpPath, audioPath string
+	var wroteAny bool
+	if s.cache != nil && s.cache.Limit() != 0 {
+		if err := os.MkdirAll(s.cache.dir, 0o700); err == nil {
+			audioPath = s.cache.Path(s.info.VideoID, "aac")
+			if f, err := os.CreateTemp(s.cache.dir, "."+filepath.Base(audioPath)+"-*.tmp"); err == nil {
+				tmpFile = f
+				tmpPath = f.Name()
 			}
 		}
 	}
-
-	// Save a complete segment set to the disk cache.
-	s.mu.Lock()
-	allDownloaded := true
-	segData := make([][]byte, len(s.segData))
-	copy(segData, s.segData)
-	for _, seg := range segData {
-		if seg == nil {
-			allDownloaded = false
-			break
+	cleanupTmp := func() {
+		if tmpFile != nil {
+			_ = tmpFile.Close()
+			tmpFile = nil
+		}
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+			tmpPath = ""
 		}
 	}
-	s.mu.Unlock()
 
-	if !allDownloaded || s.cache == nil {
+	for i := range s.segments {
+		s.mu.Lock()
+		for !s.closed && s.ctx.Err() == nil && i > s.curSeg+hlsPrefetchWindow {
+			s.prefetchCond.Wait()
+		}
+		if s.closed || s.ctx.Err() != nil {
+			s.mu.Unlock()
+			cleanupTmp()
+			return
+		}
+		s.mu.Unlock()
+
+		if err := s.fetchSegment(i); err != nil {
+			cleanupTmp()
+			return
+		}
+
+		s.mu.Lock()
+		seg := s.segData[i]
+		s.mu.Unlock()
+
+		if tmpFile != nil && len(seg) > 0 {
+			if _, err := tmpFile.Write(seg); err != nil {
+				cleanupTmp()
+			} else {
+				wroteAny = true
+			}
+		}
+
+		s.mu.Lock()
+		s.prefetchPos = i + 1
+		cur := s.curSeg
+		for j := 0; j < cur && j < s.prefetchPos; j++ {
+			s.segData[j] = nil
+		}
+		s.mu.Unlock()
+	}
+
+	if tmpFile == nil || !wroteAny {
+		cleanupTmp()
 		return
 	}
+	if err := tmpFile.Chmod(0o600); err != nil {
+		cleanupTmp()
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		tmpFile = nil
+		cleanupTmp()
+		return
+	}
+	tmpFile = nil
 
-	var fullAudio []byte
-	for _, seg := range segData {
-		fullAudio = append(fullAudio, seg...)
+	if metaBytes, err := json.Marshal(s.info); err == nil {
+		if err := os.Rename(tmpPath, audioPath); err == nil {
+			tmpPath = ""
+			if err := writeCacheFile(s.cache.Path(s.info.VideoID, "json"), metaBytes); err == nil {
+				s.cache.Prune()
+			}
+		}
 	}
-	if len(fullAudio) > 0 {
-		s.cache.Save(s.info.VideoID, s.info, fullAudio)
-	}
+	cleanupTmp()
 }
 
 func (s *hlsStream) SampleRate() int {
@@ -422,6 +520,13 @@ func (s *hlsStream) seekSegments(frame int64, sampleRate int, segments []ytmusic
 		accumulatedMs += seg.DurationMs
 	}
 
+	s.mu.Lock()
+	s.curSeg = targetSeg
+	if s.prefetchCond != nil {
+		s.prefetchCond.Broadcast()
+	}
+	s.mu.Unlock()
+
 	sr := &segmentReader{s: s, segIdx: targetSeg}
 	dec, err := aacpcm.NewDecoder(sr)
 	if err != nil {
@@ -451,7 +556,15 @@ func hlsSkipFrames(targetMs, segmentStartMs int64, sampleRate int) int64 {
 }
 
 func (s *hlsStream) Close() error {
-	s.closeOnce.Do(s.cancel)
+	s.closeOnce.Do(func() {
+		s.cancel()
+		s.mu.Lock()
+		s.closed = true
+		if s.prefetchCond != nil {
+			s.prefetchCond.Broadcast()
+		}
+		s.mu.Unlock()
+	})
 	return nil
 }
 
@@ -475,7 +588,6 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 		}
 		data := sr.s.segData[sr.segIdx]
 		segErr := sr.s.segErr[sr.segIdx]
-		done := sr.s.segDone[sr.segIdx]
 		sr.s.mu.Unlock()
 
 		if segErr != nil {
@@ -483,28 +595,10 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 		}
 
 		if data == nil {
-			// Wait for an in-flight fetch of this segment.
 			if err := sr.s.fetchSegment(sr.segIdx); err != nil {
 				return 0, err
 			}
-			sr.s.mu.Lock()
-			data = sr.s.segData[sr.segIdx]
-			segErr = sr.s.segErr[sr.segIdx]
-			sr.s.mu.Unlock()
-			if segErr != nil {
-				return 0, segErr
-			}
-			if data == nil {
-				if done == nil {
-					return 0, errors.New("hls: segment unavailable")
-				}
-				select {
-				case <-sr.s.ctx.Done():
-					return 0, sr.s.ctx.Err()
-				case <-done:
-					continue
-				}
-			}
+			continue
 		}
 
 		if sr.offset < len(data) {
@@ -514,8 +608,20 @@ func (sr *segmentReader) Read(p []byte) (int, error) {
 		}
 
 		// Move to next segment
+		prevSeg := sr.segIdx
 		sr.segIdx++
 		sr.offset = 0
+		sr.s.mu.Lock()
+		if prevSeg >= 0 && prevSeg < sr.s.prefetchPos {
+			sr.s.segData[prevSeg] = nil
+		}
+		if sr.segIdx > sr.s.curSeg {
+			sr.s.curSeg = sr.segIdx
+		}
+		if sr.s.prefetchCond != nil {
+			sr.s.prefetchCond.Broadcast()
+		}
+		sr.s.mu.Unlock()
 	}
 }
 

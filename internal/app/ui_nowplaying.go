@@ -631,7 +631,7 @@ func (a *app) npScrubber(c *ui.Context) {
 // seekScrub seeks to where the progress bar is dragged, short of its end,
 // where the track would end as it began.
 func (a *app) seekScrub(dur time.Duration) {
-	if dur <= 0 {
+	if dur <= 0 || !a.pl.CanSeek() {
 		return
 	}
 	pos := time.Duration(a.npScrub.v * float64(time.Second))

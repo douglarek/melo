@@ -7,11 +7,18 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 
 	mp3 "github.com/tphakala/go-mp3"
 
 	"github.com/douglarek/melo/internal/ytmusic"
+)
+
+var (
+	errMP3RangeUnsupported = errors.New("mp3: server ignored range request")
+	errMP3InvalidRange     = errors.New("mp3: invalid content-range")
 )
 
 // mp3Stream decodes an MP3 served over HTTP, which is how a podcast episode
@@ -34,6 +41,7 @@ type mp3Stream struct {
 	samples    []float32
 	eof        bool
 	closed     bool
+	seekable   bool
 	sampleRate int
 	channels   int
 	// bytesPerSecond maps a position to the offset a seek reads from.
@@ -61,6 +69,8 @@ func openMP3Stream(ctx context.Context, info *ytmusic.StreamInfo) (*mp3Stream, e
 		cancel:        cancel,
 		url:           info.DirectURL,
 		contentLength: info.ContentLength,
+		totalFrames:   -1,
+		seekable:      true,
 		chunk:         make([]byte, mp3ReadChunk),
 		pcm:           make([]float32, mp3FrameSamples*2),
 		spectrum:      make([]float32, 16),
@@ -102,9 +112,36 @@ func (s *mp3Stream) probe(info *ytmusic.StreamInfo) error {
 	return nil
 }
 
-func (s *mp3Stream) SampleRate() int { return s.sampleRate }
-func (s *mp3Stream) Channels() int   { return s.channels }
-func (s *mp3Stream) Len() int64      { return s.totalFrames }
+func (s *mp3Stream) SampleRate() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sampleRate
+}
+
+func (s *mp3Stream) Channels() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.channels
+}
+
+func (s *mp3Stream) Len() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.totalFrames
+}
+
+func (s *mp3Stream) Seekable() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seekable
+}
+
+func (s *mp3Stream) currentFrame() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := max(1, s.channels)
+	return max(0, s.curFrame-int64(len(s.samples))/int64(ch))
+}
 
 func (s *mp3Stream) Read(buf []float32) (int, error) {
 	s.mu.Lock()
@@ -191,12 +228,45 @@ func (s *mp3Stream) fill() error {
 	return err
 }
 
-// open reads the stream from offset, which the Range header serves.
-func (s *mp3Stream) open(offset int64) error {
-	if s.body != nil {
-		_ = s.body.Close()
-		s.body = nil
+// parseContentRange parses an HTTP Content-Range header of the form
+// "bytes <start>-<end>/<total|*>" and reports whether it is valid.
+func parseContentRange(header string) (start, end, total int64, ok bool) {
+	header = strings.TrimSpace(header)
+	if len(header) < len("bytes ") || !strings.EqualFold(header[:len("bytes ")], "bytes ") {
+		return 0, 0, 0, false
 	}
+	spec := strings.TrimSpace(header[len("bytes "):])
+	rng, totalStr, hasSlash := strings.Cut(spec, "/")
+	if !hasSlash {
+		return 0, 0, 0, false
+	}
+	startStr, endStr, hasDash := strings.Cut(rng, "-")
+	if !hasDash || startStr == "" || endStr == "" {
+		return 0, 0, 0, false
+	}
+	var err error
+	start, err = strconv.ParseInt(startStr, 10, 64)
+	if err != nil || start < 0 {
+		return 0, 0, 0, false
+	}
+	end, err = strconv.ParseInt(endStr, 10, 64)
+	if err != nil || end < start {
+		return 0, 0, 0, false
+	}
+	if totalStr == "*" {
+		return start, end, 0, true
+	}
+	total, err = strconv.ParseInt(totalStr, 10, 64)
+	if err != nil || total <= end {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
+}
+
+// open reads the stream from offset, which the Range header serves. The new
+// response is validated before replacing the existing stream so a failed seek
+// leaves playback intact.
+func (s *mp3Stream) open(offset int64) error {
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, s.url, nil)
 	if err != nil {
 		return err
@@ -208,9 +278,44 @@ func (s *mp3Stream) open(offset int64) error {
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		_ = resp.Body.Close()
-		return fmt.Errorf("mp3 request HTTP %d", resp.StatusCode)
+	if offset > 0 {
+		if resp.StatusCode == http.StatusOK {
+			_ = resp.Body.Close()
+			s.seekable = false
+			return errMP3RangeUnsupported
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			_ = resp.Body.Close()
+			return fmt.Errorf("mp3 request HTTP %d", resp.StatusCode)
+		}
+		start, end, total, ok := parseContentRange(resp.Header.Get("Content-Range"))
+		if !ok || start != offset || end < start || (total > 0 && end >= total) || (s.contentLength > 0 && total > 0 && total != s.contentLength) {
+			_ = resp.Body.Close()
+			s.seekable = false
+			return errMP3InvalidRange
+		}
+	} else {
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+			_ = resp.Body.Close()
+			return fmt.Errorf("mp3 request HTTP %d", resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusPartialContent {
+			start, end, total, ok := parseContentRange(resp.Header.Get("Content-Range"))
+			if !ok || start != 0 || end < start || (total > 0 && end >= total) {
+				_ = resp.Body.Close()
+				return errMP3InvalidRange
+			}
+		}
+		if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Accept-Ranges")), "none") {
+			s.seekable = false
+		}
+		if s.contentLength <= 0 && resp.ContentLength > 0 && resp.StatusCode == http.StatusOK {
+			s.contentLength = resp.ContentLength
+		}
+	}
+
+	if s.body != nil {
+		_ = s.body.Close()
 	}
 	s.body = resp.Body
 	s.dec = mp3.NewDecoder()
@@ -232,11 +337,15 @@ func (s *mp3Stream) SetPosition(frame int64) error {
 	if s.totalFrames > 0 && frame > s.totalFrames {
 		frame = s.totalFrames
 	}
+	if frame > 0 && (s.bytesPerSecond <= 0 || s.sampleRate <= 0) {
+		s.seekable = false
+		return errMP3RangeUnsupported
+	}
 	offset := int64(0)
 	if s.bytesPerSecond > 0 && s.sampleRate > 0 {
 		offset = frame * s.bytesPerSecond / int64(s.sampleRate)
-		if s.contentLength > 0 && offset > s.contentLength {
-			offset = s.contentLength
+		if s.contentLength > 0 && offset >= s.contentLength {
+			offset = s.contentLength - 1
 		}
 	}
 	if err := s.open(offset); err != nil {

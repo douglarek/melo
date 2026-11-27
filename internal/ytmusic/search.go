@@ -129,10 +129,10 @@ func parseSearchResponse(data []byte) (*SearchResult, error) {
 }
 
 func parseCardShelf(card map[string]any, res *SearchResult) {
-	titleRuns, _ := card["title"].(map[string]any)["runs"].([]any)
+	titleRuns := navSlice(card, "title", "runs")
 	title := RunsToString(titleRuns)
 
-	subtitleRuns, _ := card["subtitle"].(map[string]any)["runs"].([]any)
+	subtitleRuns := navSlice(card, "subtitle", "runs")
 	subtitle := RunsToString(subtitleRuns)
 
 	thumbs := ParseThumbnails(card["thumbnail"])
@@ -206,18 +206,18 @@ func parseResponsiveListItem(r map[string]any, res *SearchResult) {
 	}
 
 	// Title from col 0
-	col0, _ := flexCols[0].(map[string]any)
-	col0Flex, _ := col0["musicResponsiveListItemFlexColumnRenderer"].(map[string]any)
-	col0Runs, _ := col0Flex["text"].(map[string]any)["runs"].([]any)
+	col0 := asMap(flexCols[0])
+	col0Flex := asMap(col0["musicResponsiveListItemFlexColumnRenderer"])
+	col0Runs := navSlice(col0Flex, "text", "runs")
 	title := RunsToString(col0Runs)
 
 	// Subtitle from col 1
 	var subtitle string
 	var col1Runs []any
 	if len(flexCols) > 1 {
-		col1, _ := flexCols[1].(map[string]any)
-		col1Flex, _ := col1["musicResponsiveListItemFlexColumnRenderer"].(map[string]any)
-		col1Runs, _ = col1Flex["text"].(map[string]any)["runs"].([]any)
+		col1 := asMap(flexCols[1])
+		col1Flex := asMap(col1["musicResponsiveListItemFlexColumnRenderer"])
+		col1Runs = navSlice(col1Flex, "text", "runs")
 		subtitle = RunsToString(col1Runs)
 	}
 

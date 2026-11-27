@@ -110,7 +110,7 @@ func (a *app) npLyricLine(c *ui.Context, i int, synced bool, curLine int) ui.Ele
 	if row.Hovered() && !active {
 		row.Background(npWhite.Alpha(0.06))
 	}
-	if synced && row.Clicked() {
+	if synced && row.Clicked() && a.pl.CanSeek() {
 		a.npLyricsManual = false
 		a.npCurrentY = a.npLyricScroll.Y
 		a.pl.Seek(time.Duration(line.TimeMs) * time.Millisecond)

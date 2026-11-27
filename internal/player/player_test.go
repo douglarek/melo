@@ -19,6 +19,7 @@ func newTestPlayer(t *testing.T) *Player {
 	p.Resolve = func(ctx context.Context, track ytmusic.Track) (*ytmusic.StreamInfo, error) {
 		return nil, errors.New("test mock offline")
 	}
+	t.Cleanup(func() { _ = p.Close() })
 	return p
 }
 

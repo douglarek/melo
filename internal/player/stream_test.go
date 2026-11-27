@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -302,4 +303,152 @@ func TestHLSCloseWakesSegmentWait(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("HLS open did not return after cancellation")
 	}
+}
+
+func TestHLSBackwardSeekAfterEviction(t *testing.T) {
+	const segmentCount = 10
+	chunks := make([][]byte, segmentCount)
+	var combined []byte
+	for i := range chunks {
+		chunks[i] = encodeADTS(t, 0.25)
+		combined = append(combined, chunks[i]...)
+	}
+
+	reqCounts := make([]atomic.Int32, segmentCount)
+	releaseTail := make(chan struct{})
+	var releaseOnce atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := strings.TrimPrefix(r.URL.Path, "/seg/")
+		idx, err := strconv.Atoi(raw)
+		if err != nil || idx < 0 || idx >= len(chunks) {
+			http.NotFound(w, r)
+			return
+		}
+		reqCounts[idx].Add(1)
+		if idx == segmentCount-1 {
+			<-releaseTail
+		}
+		_, _ = w.Write(chunks[idx])
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		if releaseOnce.CompareAndSwap(false, true) {
+			close(releaseTail)
+		}
+	})
+
+	cache := NewCache(t.TempDir(), 10<<20)
+	info := &ytmusic.StreamInfo{
+		VideoID:    "hls-backseek",
+		Format:     "hls",
+		SampleRate: 44100,
+		Channels:   2,
+		DurationMs: segmentCount * 250,
+	}
+	for i := range segmentCount {
+		info.Segments = append(info.Segments, ytmusic.StreamSegment{
+			URI:        fmt.Sprintf("%s/seg/%d", server.URL, i),
+			DurationMs: 250,
+		})
+	}
+
+	s, err := openHLSStream(t.Context(), info, cache)
+	if err != nil {
+		t.Fatalf("openHLSStream: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	// Consume past the prefetch window (hlsPrefetchWindow = 4) while the tail segment
+	// keeps prefetchAll active, forcing eviction of early segments.
+	buf := make([]float32, 4096)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		n, err := s.Read(buf)
+		if err != nil {
+			t.Fatalf("Read before seek: %v", err)
+		}
+		if n == 0 {
+			t.Fatal("Read returned 0 samples before reaching target segment")
+		}
+		s.mu.Lock()
+		curSeg := s.curSeg
+		evicted0 := s.segData[0] == nil
+		evicted1 := s.segData[1] == nil
+		s.mu.Unlock()
+		if curSeg >= hlsPrefetchWindow+2 && evicted0 && evicted1 {
+			break
+		}
+	}
+
+	s.mu.Lock()
+	curSeg := s.curSeg
+	evicted1 := s.segData[1] == nil
+	s.mu.Unlock()
+	if curSeg < hlsPrefetchWindow+2 || !evicted1 {
+		t.Fatalf("expected consumption past window and eviction: curSeg=%d evicted1=%v", curSeg, evicted1)
+	}
+
+	// Seek back into already-evicted segment 1 (0.25s = 11025 frames at 44100 Hz).
+	beforeReqs := reqCounts[1].Load()
+	if err := s.SetPosition(11025); err != nil {
+		t.Fatalf("backward SetPosition failed: %v", err)
+	}
+	if got := reqCounts[1].Load(); got <= beforeReqs {
+		t.Fatalf("segment 1 was not re-fetched after eviction: requests before=%d after=%d", beforeReqs, got)
+	}
+
+	// Release the tail segment and verify decoding continues cleanly through EOF.
+	if releaseOnce.CompareAndSwap(false, true) {
+		close(releaseTail)
+	}
+
+	readDone := make(chan error, 1)
+	var samplesAfterSeek int
+	go func() {
+		for {
+			n, err := s.Read(buf)
+			samplesAfterSeek += n
+			if errors.Is(err, io.EOF) {
+				readDone <- nil
+				return
+			}
+			if err != nil {
+				readDone <- err
+				return
+			}
+		}
+	}()
+
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("Read after backward seek: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("HLS read after backward seek deadlocked")
+	}
+	if samplesAfterSeek == 0 {
+		t.Fatal("expected decoded samples after backward seek")
+	}
+
+	// Early segments should remain evicted after re-reading, and cache publication
+	// should contain every segment in exact order without gaps or duplicates.
+	s.mu.Lock()
+	stillEvicted := s.segData[0] == nil && s.segData[1] == nil
+	s.mu.Unlock()
+	if !stillEvicted {
+		t.Fatal("expected early segments to stay evicted after re-reading")
+	}
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cached, _, ok := cache.Lookup(info.VideoID); ok {
+			if !bytes.Equal(cached, combined) {
+				t.Fatalf("cached HLS bytes mismatch: got %d bytes, want %d bytes", len(cached), len(combined))
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cached HLS audio was not published after backward seek")
 }

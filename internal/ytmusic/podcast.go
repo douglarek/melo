@@ -32,7 +32,7 @@ func (c *Client) resolvePodcast(ctx context.Context, videoID string) (*StreamInf
 // podcastStream returns the enclosure a player response names, which is a
 // direct URL on the show's host rather than a YouTube one.
 func podcastStream(videoID string, resp map[string]any) (*StreamInfo, error) {
-	status, _ := resp["playabilityStatus"].(map[string]any)["status"].(string)
+	status, _ := navMap(resp, "playabilityStatus")["status"].(string)
 	if status != "OK" {
 		return nil, ErrUnavailable
 	}

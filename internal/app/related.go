@@ -24,12 +24,13 @@ func (a *app) loadRelated() {
 	a.relatedLoaded = false
 	a.npRelatedScroll = ui.ScrollState{}
 
+	accGen, accCtx := a.currentAccount()
 	go func(videoID string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(accCtx, 15*time.Second)
 		defer cancel()
 		sections, err := ytmusic.DefaultClient.GetRelated(ctx, videoID)
 		a.post(func() {
-			if a.relatedVideoID != videoID {
+			if !a.isAccountCurrent(accGen) || a.relatedVideoID != videoID {
 				return
 			}
 			a.relatedLoading = false

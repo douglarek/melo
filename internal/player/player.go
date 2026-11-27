@@ -3,9 +3,11 @@ package player
 import (
 	"context"
 	"errors"
+	"math"
 	"math/rand/v2"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/audio"
@@ -110,42 +112,53 @@ func (p *Player) SetContext(ctx context.Context) {
 	p.mu.Unlock()
 }
 
+// CloseAsync stops playback and cancels active loads without waiting for
+// background load goroutines to return. Call Wait after the UI loop exits.
+func (p *Player) CloseAsync() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.pauseOffset = p.positionLocked()
+	p.closed = true
+	p.gen++
+	p.loading = false
+	p.playing = false
+	p.pendingPlay = false
+	p.feed = nil
+	p.feeding = false
+	p.radioGen++
+	if p.cancelLoad != nil {
+		p.cancelLoad()
+		p.cancelLoad = nil
+	}
+	out := p.out
+	st := p.stream
+	p.out = nil
+	p.stream = nil
+	p.info = nil
+	p.fade.attach(nil, 1)
+	p.mu.Unlock()
+
+	if st != nil {
+		_ = st.Close()
+	}
+	if out != nil {
+		out.Pause()
+		out.Close()
+	}
+}
+
+// Wait blocks until background stream load goroutines have finished.
+func (p *Player) Wait() {
+	p.loadWG.Wait()
+}
+
 // Close stops playback and waits for the current load to return.
 func (p *Player) Close() error {
-	p.mu.Lock()
-	if !p.closed {
-		p.pauseOffset = p.positionLocked()
-		p.closed = true
-		p.gen++
-		p.loading = false
-		p.playing = false
-		p.pendingPlay = false
-		p.feed = nil
-		p.radioGen++
-		if p.cancelLoad != nil {
-			p.cancelLoad()
-			p.cancelLoad = nil
-		}
-		out := p.out
-		st := p.stream
-		p.out = nil
-		p.stream = nil
-		p.info = nil
-		p.fade.attach(nil, 1)
-		p.mu.Unlock()
-
-		if st != nil {
-			_ = st.Close()
-		}
-		if out != nil {
-			out.Pause()
-			out.Close()
-		}
-	} else {
-		p.mu.Unlock()
-	}
-
-	p.loadWG.Wait()
+	p.CloseAsync()
+	p.Wait()
 	return nil
 }
 
@@ -359,6 +372,7 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 		p.pendingPlay = false
 		p.failStreak = 0
 		p.feed = nil
+		p.feeding = false
 		p.radio = ""
 		p.radioGen++
 		p.mu.Unlock()
@@ -374,6 +388,7 @@ func (p *Player) SetQueue(tracks []ytmusic.Track, at int) {
 	p.reorderLocked(start)
 	p.failStreak = 0
 	p.feed = nil
+	p.feeding = false
 	p.radio = ""
 	p.radioGen++
 	p.mu.Unlock()
@@ -535,6 +550,13 @@ func (p *Player) playCurrent() {
 		}
 
 		var st stream
+		if info.Sabr != nil {
+			defer func() {
+				if st == nil {
+					_ = info.Sabr.Close()
+				}
+			}()
+		}
 		switch {
 		case info.Sabr != nil:
 			st, err = openSabrPure(info.Sabr, info)
@@ -551,7 +573,11 @@ func (p *Player) playCurrent() {
 		case info.LocalPath != "":
 			st, err = openMP4Stream(info.LocalPath)
 		case info.Format == "mp3" && info.DirectURL != "":
-			st, err = openMP3Stream(ctx, info)
+			mp3Info := *info
+			if mp3Info.DurationMs <= 0 && track.DurationMs > 0 {
+				mp3Info.DurationMs = track.DurationMs
+			}
+			st, err = openMP3Stream(ctx, &mp3Info)
 		case info.Format == "mp4" && info.DirectURL != "":
 			cachePath := p.Cache.Path(info.VideoID, "mp4")
 			durMs := track.DurationMs
@@ -578,10 +604,27 @@ func (p *Player) playCurrent() {
 		}
 		p.mu.Unlock()
 
-		out := audio.NewPlayer(st)
-		if resumeAt > 0 {
-			out.Seek(resumeAt)
-		}
+		var out *audio.Player
+		var dec *seekGuardDecoder
+		dec = newSeekGuardDecoder(st, func(curFrame int64) {
+			p.post(func() {
+				p.mu.Lock()
+				if p.closed || gen != p.gen || p.out != out || dec.snapFrame.Load() != curFrame {
+					p.mu.Unlock()
+					return
+				}
+				var actualPos time.Duration
+				if sr := st.SampleRate(); sr > 0 {
+					actualPos = time.Duration(math.Round(float64(curFrame) / float64(sr) * float64(time.Second)))
+				}
+				p.pauseOffset = actualPos
+				p.playStart = time.Now()
+				p.out.Seek(actualPos)
+				p.mu.Unlock()
+				p.changed()
+			})
+		})
+		out = audio.NewPlayer(dec)
 		out.OnEnd(func() {
 			p.post(func() {
 				p.onTrackEnd(out)
@@ -596,15 +639,25 @@ func (p *Player) playCurrent() {
 				out.Close()
 				return
 			}
-			if pos, ok := p.takePendingSeekLocked(track.ID); ok {
-				out.Seek(pos)
-				p.pauseOffset = pos
-			}
 			p.stream = st
 			p.out = out
 			p.info = info
 			p.loading = false
 			p.failStreak = 0
+			if pos, ok := p.takePendingSeekLocked(track.ID); ok {
+				if pos == 0 || streamCanSeek(st) {
+					out.Seek(pos)
+					p.pauseOffset = pos
+				} else {
+					p.pauseOffset = 0
+				}
+			} else if resumeAt > 0 {
+				if streamCanSeek(st) {
+					out.Seek(resumeAt)
+				} else {
+					p.pauseOffset = 0
+				}
+			}
 			playNow := p.pendingPlay
 			p.pendingPlay = false
 			p.playing = playNow
@@ -691,8 +744,12 @@ func (p *Player) checkRadioFeed() {
 	go feed(func(more []ytmusic.Track) {
 		p.post(func() {
 			p.mu.Lock()
+			if p.radioGen != gen {
+				p.mu.Unlock()
+				return
+			}
 			p.feeding = false
-			if p.radioGen != gen || len(more) == 0 {
+			if len(more) == 0 {
 				p.mu.Unlock()
 				return
 			}
@@ -712,6 +769,7 @@ func (p *Player) checkRadioFeed() {
 func (p *Player) AttachFeed(feed func(got func([]ytmusic.Track))) {
 	p.mu.Lock()
 	p.feed = feed
+	p.feeding = false
 	p.radioGen++
 	p.mu.Unlock()
 	p.checkRadioFeed()
@@ -721,6 +779,7 @@ func (p *Player) AttachFeed(feed func(got func([]ytmusic.Track))) {
 func (p *Player) DetachFeed() {
 	p.mu.Lock()
 	p.feed = nil
+	p.feeding = false
 	p.radioGen++
 	p.mu.Unlock()
 }
@@ -730,6 +789,7 @@ func (p *Player) AttachRadio(radioID string, feed func(got func([]ytmusic.Track)
 	p.mu.Lock()
 	p.radio = radioID
 	p.feed = feed
+	p.feeding = false
 	p.radioGen++
 	p.mu.Unlock()
 	p.checkRadioFeed()
@@ -740,6 +800,7 @@ func (p *Player) DetachRadio() {
 	p.mu.Lock()
 	p.radio = ""
 	p.feed = nil
+	p.feeding = false
 	p.radioGen++
 	p.mu.Unlock()
 }
@@ -960,9 +1021,20 @@ func (p *Player) Duration() time.Duration {
 	return 0
 }
 
+// CanSeek reports whether the active stream supports non-zero seeking.
+func (p *Player) CanSeek() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return streamCanSeek(p.stream)
+}
+
 // Seek seeks to pos.
 func (p *Player) Seek(pos time.Duration) {
 	p.mu.Lock()
+	if pos > 0 && p.stream != nil && !streamCanSeek(p.stream) {
+		p.mu.Unlock()
+		return
+	}
 	p.pauseOffset = pos
 	p.playStart = time.Now()
 	if p.out != nil {
@@ -980,6 +1052,68 @@ func (p *Player) Seek(pos time.Duration) {
 	}
 	p.mu.Unlock()
 	p.changed()
+}
+
+type seekableStream interface {
+	stream
+	Seekable() bool
+}
+
+func streamCanSeek(st stream) bool {
+	if ss, ok := st.(seekableStream); ok {
+		return ss.Seekable()
+	}
+	return true
+}
+
+// seekGuardDecoder wraps a stream for audio.Player so an unsupported non-zero
+// seek preserves playback instead of letting audio.Player treat the SetPosition
+// error as EOF.
+type seekGuardDecoder struct {
+	stream
+	onReject  func(frame int64)
+	rejected  atomic.Bool
+	snapFrame atomic.Int64
+}
+
+func newSeekGuardDecoder(st stream, onReject func(frame int64)) *seekGuardDecoder {
+	g := &seekGuardDecoder{stream: st, onReject: onReject}
+	g.snapFrame.Store(-1)
+	return g
+}
+
+func (g *seekGuardDecoder) SetPosition(frame int64) error {
+	if frame >= 0 && g.snapFrame.CompareAndSwap(frame, -1) {
+		return nil
+	}
+	if frame > 0 {
+		if g.rejected.Load() || !streamCanSeek(g.stream) {
+			g.rejected.Store(true)
+			g.notifyReject()
+			return nil
+		}
+	}
+	err := g.stream.SetPosition(frame)
+	if err != nil && frame > 0 && (errors.Is(err, errMP3RangeUnsupported) || errors.Is(err, errMP3InvalidRange)) {
+		g.rejected.Store(true)
+		g.notifyReject()
+		return nil
+	}
+	return err
+}
+
+func (g *seekGuardDecoder) notifyReject() {
+	cur := int64(0)
+	if mp, ok := g.stream.(*mp3Stream); ok {
+		cur = mp.currentFrame()
+	}
+	if l := g.stream.Len(); l >= 0 && cur > l {
+		cur = l
+	}
+	g.snapFrame.Store(cur)
+	if g.onReject != nil {
+		g.onReject(cur)
+	}
 }
 
 // Spectrum returns current frequency spectrum readings.

@@ -416,6 +416,12 @@ func scanSizes(files []cacheFile) Sizes {
 	return sizes
 }
 
+// isKeptLocked reports whether path belongs to the currently kept track.
+// The caller holds c.mu.
+func (c *Cache) isKeptLocked(path string) bool {
+	return c.keep != "" && strings.HasPrefix(filepath.Base(path), c.keep+".")
+}
+
 // pruneLocked evicts what the cache holds until it is under its limit:
 // abandoned downloads first, then covers beyond their share, then whatever
 // was used longest ago, leaving the track playing and what a download is
@@ -475,7 +481,7 @@ func (c *Cache) pruneLocked() {
 		if total <= target {
 			break
 		}
-		if now.Sub(f.mod) < tempGrace {
+		if c.isKeptLocked(f.path) || now.Sub(f.mod) < tempGrace {
 			continue
 		}
 		total -= drop(f)
@@ -500,10 +506,7 @@ func (c *Cache) pruneLocked() {
 			break
 		}
 		if f.kind == fileSong {
-			if now.Sub(f.mod) < tempGrace {
-				continue
-			}
-			if c.keep != "" && strings.HasPrefix(filepath.Base(f.path), c.keep+".") {
+			if now.Sub(f.mod) < tempGrace || c.isKeptLocked(f.path) {
 				continue
 			}
 		}
@@ -516,7 +519,7 @@ func (c *Cache) pruneLocked() {
 		if total <= target {
 			break
 		}
-		if orphanedSidecar(f.path) {
+		if !c.isKeptLocked(f.path) && orphanedSidecar(f.path) {
 			total -= drop(f)
 		}
 	}
@@ -562,27 +565,36 @@ func (c *Cache) Migrate() int64 {
 
 	var freed int64
 	now := time.Now()
-	entries, _ := os.ReadDir(c.dir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		name := e.Name()
-		stale := strings.Contains(name, ".heaac.")
-		if !stale && isTemp(name) && now.Sub(info.ModTime()) > staleTempAge {
-			stale = true
-		}
-		if !stale {
-			continue
-		}
-		if err := os.Remove(filepath.Join(c.dir, name)); err == nil {
-			freed += info.Size()
+	scanDir := func(dir string, dropHeaac bool) {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			name := e.Name()
+			path := filepath.Join(dir, name)
+			if c.isKeptLocked(path) {
+				continue
+			}
+			stale := dropHeaac && strings.Contains(name, ".heaac.")
+			if !stale && isTemp(name) && now.Sub(info.ModTime()) > staleTempAge {
+				stale = true
+			}
+			if !stale {
+				continue
+			}
+			if err := os.Remove(path); err == nil {
+				freed += info.Size()
+			}
 		}
 	}
+	scanDir(c.dir, true)
+	scanDir(c.SabrDir(), false)
+	scanDir(c.ArtworkDir(), false)
 	c.sizes = scanSizes(c.filesLocked())
 	return freed
 }

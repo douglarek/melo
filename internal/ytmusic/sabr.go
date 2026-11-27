@@ -2,6 +2,7 @@ package ytmusic
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -13,7 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,13 +86,15 @@ type umpPart struct {
 }
 
 type sabrMediaHeader struct {
-	headerID int
-	seq      int
-	init     bool
-	content  int64
-	startMs  int64
-	durMs    int64
-	offset   int64
+	headerID    int
+	seq         int
+	init        bool
+	content     int64
+	startMs     int64
+	durMs       int64
+	offset      int64
+	startOffset int64
+	written     int64
 }
 
 // protoBuf is a minimal protobuf wire writer.
@@ -144,15 +147,24 @@ func protoParse(b []byte) (map[int][]protoValue, error) {
 			out[field] = append(out[field], protoValue{varint: v})
 		case 2:
 			ln, n := readVarint(b[pos:])
-			if n == 0 || pos+n+int(ln) > len(b) {
+			if n == 0 {
 				return nil, errors.New("sabr: bad protobuf bytes")
 			}
 			pos += n
+			if ln > uint64(len(b)-pos) {
+				return nil, errors.New("sabr: bad protobuf bytes")
+			}
 			out[field] = append(out[field], protoValue{bytes: b[pos : pos+int(ln)]})
 			pos += int(ln)
 		case 1:
+			if len(b)-pos < 8 {
+				return nil, errors.New("sabr: bad protobuf fixed64")
+			}
 			pos += 8
 		case 5:
+			if len(b)-pos < 4 {
+				return nil, errors.New("sabr: bad protobuf fixed32")
+			}
 			pos += 4
 		default:
 			return nil, fmt.Errorf("sabr: unsupported protobuf wire type %d", tag&7)
@@ -313,7 +325,7 @@ func (c *Client) visionOSPlayer(ctx context.Context, videoID, visitor string) (m
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpDo(req)
 	if err != nil {
 		return nil, err
 	}
@@ -483,8 +495,11 @@ func (c *Client) sabrRequest(s *SabrStream, pot []byte, cookie []byte, playerTim
 type SabrSession struct {
 	mu        sync.Mutex
 	cond      *sync.Cond
+	fileMu    sync.RWMutex
 	file      *os.File
 	path      string
+	tempPath  string
+	published bool
 	total     int64
 	pos       int64
 	covered   []sabrInterval
@@ -496,6 +511,7 @@ type SabrSession struct {
 	doneCh    chan struct{}
 	done      bool
 	err       error
+	cacheErr  error
 	cancel    context.CancelFunc
 	closed    bool
 }
@@ -506,27 +522,50 @@ type sabrSegment struct {
 	startMs, durMs, offset, length int64
 }
 
-func newSabrSession(path string, total int64) (*SabrSession, error) {
-	f, err := os.Create(path)
+func newSabrSession(dest string, total int64) (*SabrSession, error) {
+	if total <= 0 {
+		return nil, errors.New("sabr: invalid content length")
+	}
+	dir := filepath.Dir(dest)
+	base := filepath.Base(dest)
+	f, err := os.CreateTemp(dir, base+".*.tmp")
 	if err != nil {
 		return nil, err
 	}
+	tempPath := f.Name()
 	if err := f.Truncate(total); err != nil {
-		f.Close()
+		_ = f.Close()
+		_ = os.Remove(tempPath)
 		return nil, err
 	}
-	s := &SabrSession{file: f, path: path, total: total, ready: make(chan struct{}), doneCh: make(chan struct{})}
+	s := &SabrSession{
+		file:     f,
+		path:     dest,
+		tempPath: tempPath,
+		total:    total,
+		ready:    make(chan struct{}),
+		doneCh:   make(chan struct{}),
+	}
 	s.cond = sync.NewCond(&s.mu)
 	return s, nil
 }
 
 func (s *SabrSession) signalReady() { s.readyOnce.Do(func() { close(s.ready) }) }
 
-func (s *SabrSession) mark(off, n int64) {
+func (s *SabrSession) mark(off, n int64) bool {
+	if n <= 0 {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	before := s.coveredBytesLocked()
 	s.covered = append(s.covered, sabrInterval{start: off, end: off + n})
-	sort.Slice(s.covered, func(i, j int) bool { return s.covered[i].start < s.covered[j].start })
+	slices.SortFunc(s.covered, func(a, b sabrInterval) int {
+		if c := cmp.Compare(a.start, b.start); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.end, b.end)
+	})
 	merged := s.covered[:0]
 	for _, iv := range s.covered {
 		if len(merged) == 0 || iv.start > merged[len(merged)-1].end {
@@ -538,10 +577,23 @@ func (s *SabrSession) mark(off, n int64) {
 		}
 	}
 	s.covered = merged
+	after := s.coveredBytesLocked()
 	s.cond.Broadcast()
+	return after > before
+}
+
+func (s *SabrSession) coveredBytesLocked() int64 {
+	var n int64
+	for _, iv := range s.covered {
+		n += iv.end - iv.start
+	}
+	return n
 }
 
 func (s *SabrSession) coveredLocked(off, n int64) bool {
+	if off < 0 || n <= 0 || off > s.total || n > s.total-off {
+		return false
+	}
 	end := off + n
 	for _, iv := range s.covered {
 		if iv.start <= off && iv.end >= end {
@@ -552,6 +604,16 @@ func (s *SabrSession) coveredLocked(off, n int64) bool {
 		}
 	}
 	return false
+}
+
+func (s *SabrSession) isRangeCovered(off, n int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coveredLocked(off, n)
+}
+
+func (s *SabrSession) isComplete() bool {
+	return s.total > 0 && s.isRangeCovered(0, s.total)
 }
 
 func (s *SabrSession) wait(off, n int64) error {
@@ -571,12 +633,25 @@ func (s *SabrSession) wait(off, n int64) error {
 	}
 }
 
-func (s *SabrSession) writeAt(p []byte, off int64) error {
-	if _, err := s.file.WriteAt(p, off); err != nil {
-		return err
+func (s *SabrSession) writeAt(p []byte, off int64) (bool, error) {
+	if off < 0 || off > s.total || int64(len(p)) > s.total-off {
+		return false, errors.New("sabr: write out of bounds")
 	}
-	s.mark(off, int64(len(p)))
-	return nil
+	if len(p) == 0 {
+		return false, nil
+	}
+	s.fileMu.RLock()
+	f := s.file
+	if f == nil {
+		s.fileMu.RUnlock()
+		return false, errors.New("sabr: session closed")
+	}
+	_, err := f.WriteAt(p, off)
+	s.fileMu.RUnlock()
+	if err != nil {
+		return false, err
+	}
+	return s.mark(off, int64(len(p))), nil
 }
 
 func (s *SabrSession) addSegment(startMs, durMs, offset, length int64) {
@@ -588,7 +663,9 @@ func (s *SabrSession) addSegment(startMs, durMs, offset, length int64) {
 		}
 	}
 	s.index = append(s.index, sabrSegment{startMs: startMs, durMs: durMs, offset: offset, length: length})
-	sort.Slice(s.index, func(i, j int) bool { return s.index[i].startMs < s.index[j].startMs })
+	slices.SortFunc(s.index, func(a, b sabrSegment) int {
+		return cmp.Compare(a.startMs, b.startMs)
+	})
 }
 
 func (s *SabrSession) setInit(offset, length int64) {
@@ -631,11 +708,19 @@ func (s *SabrSession) ReadAt(p []byte, off int64) (int, error) {
 		return 0, io.EOF
 	}
 	n := int64(len(p))
-	if off+n > s.total {
+	if n > s.total-off {
 		n = s.total - off
+	}
+	if n == 0 {
+		return 0, nil
 	}
 	if err := s.wait(off, n); err != nil {
 		return 0, err
+	}
+	s.fileMu.RLock()
+	defer s.fileMu.RUnlock()
+	if s.file == nil {
+		return 0, errors.New("sabr: session closed")
 	}
 	return s.file.ReadAt(p[:n], off)
 }
@@ -697,7 +782,72 @@ func (s *SabrSession) Wait(ctx context.Context) error {
 	}
 }
 
-// Close stops the download and drops a file it did not finish.
+// publish atomically moves the completed temporary file into dest, writes the
+// completion marker, and reopens dest while synchronizing with active readers
+// so Windows renames succeed without breaking concurrent reads.
+func (s *SabrSession) publish(sizeStr string) error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return errors.New("sabr: session closed")
+	}
+
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file = nil
+	}
+
+	if err := os.Rename(s.tempPath, s.path); err != nil {
+		// If caching fails (e.g. target open elsewhere on Windows or temp file
+		// removed), keep the session readable from its temp file when possible.
+		if f, openErr := os.Open(s.tempPath); openErr == nil {
+			s.file = f
+			s.mu.Lock()
+			s.cacheErr = fmt.Errorf("sabr: publish failed: %w", err)
+			s.mu.Unlock()
+			log.Printf("sabr: cache publish failed (%v); keeping temporary stream file", err)
+			return nil
+		}
+		if _, ok := drainedFile("", s.path); ok {
+			if f, openErr := os.Open(s.path); openErr == nil {
+				s.file = f
+				s.published = true
+				return nil
+			}
+		}
+		return fmt.Errorf("sabr: publish failed: %w", err)
+	}
+
+	s.published = true
+	if okTmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".ok.*.tmp"); err == nil {
+		okTmpName := okTmp.Name()
+		_, werr := okTmp.WriteString(sizeStr)
+		cerr := okTmp.Close()
+		if werr == nil && cerr == nil {
+			if rerr := os.Rename(okTmpName, s.path+".ok"); rerr != nil {
+				_ = os.Remove(okTmpName)
+				_ = os.WriteFile(s.path+".ok", []byte(sizeStr), 0o644)
+			}
+		} else {
+			_ = os.Remove(okTmpName)
+		}
+	} else {
+		_ = os.WriteFile(s.path+".ok", []byte(sizeStr), 0o644)
+	}
+
+	f, err := os.Open(s.path)
+	if err != nil {
+		return fmt.Errorf("sabr: reopen published file: %w", err)
+	}
+	s.file = f
+	return nil
+}
+
+// Close stops the download and drops its temporary file if unpublished.
 func (s *SabrSession) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -705,24 +855,27 @@ func (s *SabrSession) Close() error {
 		return nil
 	}
 	s.closed = true
-	failed := s.err != nil
 	if s.err == nil {
 		s.err = errors.New("sabr: session closed")
 	}
-	done := s.done
 	cancel := s.cancel
+	s.cond.Broadcast()
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	s.cond.Broadcast()
+	s.fileMu.Lock()
+	f := s.file
+	s.file = nil
+	published := s.published
+	tempPath := s.tempPath
+	s.fileMu.Unlock()
 	var err error
-	if s.file != nil {
-		err = s.file.Close()
+	if f != nil {
+		err = f.Close()
 	}
-	if !done || failed {
-		_ = os.Remove(s.path)
-		_ = os.Remove(s.path + ".ok")
+	if !published && tempPath != "" {
+		_ = os.Remove(tempPath)
 	}
 	return err
 }
@@ -742,9 +895,7 @@ func (c *Client) startSabrSession(ctx context.Context, stream *SabrStream, token
 	go func() {
 		err := c.runSabr(runCtx, stream, token, sess)
 		if err == nil {
-			// The app's cache prunes the directory, under the limit the user
-			// chose: keep the drained file, marker and all, until then.
-			err = os.WriteFile(dest+".ok", []byte(size), 0o644)
+			err = sess.publish(size)
 		}
 		sess.finish(err)
 	}()
@@ -779,7 +930,7 @@ func (c *Client) DownloadSabr(ctx context.Context, s *SabrStream, token string, 
 	for !sess.done {
 		sess.cond.Wait()
 	}
-	err = sess.err
+	err = errors.Join(sess.err, sess.cacheErr)
 	sess.mu.Unlock()
 	return err
 }
@@ -789,9 +940,19 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
-	segs := map[int]int64{}
-	var initBytes int64
+	client := &http.Client{Timeout: 60 * time.Second, Transport: c.httpTransport()}
+	type sabrSegMeta struct {
+		offset  int64
+		length  int64
+		startMs int64
+		durMs   int64
+	}
+	segMeta := map[int]sabrSegMeta{}
+	var initMeta struct {
+		known  bool
+		offset int64
+		length int64
+	}
 	playerTimeMs, bufEndMs := int64(0), int64(0)
 	lastSeq, endSeg := 0, 0
 	var playbackCookie []byte
@@ -826,7 +987,7 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 		}
 		headers := map[int]*sabrMediaHeader{}
 		redirect := ""
-		newSeg := false
+		progress := false
 		for _, p := range parts {
 			switch p.typ {
 			case umpMediaHeader:
@@ -839,34 +1000,64 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 					h.headerID = int(v[0].varint)
 				}
 				if v := fields[9]; len(v) > 0 {
+					if v[0].varint > math.MaxInt {
+						return errors.New("sabr: invalid segment sequence")
+					}
 					h.seq = int(v[0].varint)
 				}
 				if v := fields[8]; len(v) > 0 {
 					h.init = v[0].varint != 0
 				}
 				if v := fields[14]; len(v) > 0 {
+					if v[0].varint > math.MaxInt64 {
+						return errors.New("sabr: invalid media content length")
+					}
 					h.content = int64(v[0].varint)
 				}
 				if v := fields[6]; len(v) > 0 {
+					if v[0].varint > math.MaxInt64 {
+						return errors.New("sabr: invalid media offset")
+					}
 					h.offset = int64(v[0].varint)
 				}
+				if h.offset < 0 || h.content < 0 || h.offset > sess.total || h.content > sess.total-h.offset {
+					return errors.New("sabr: media header out of bounds")
+				}
+				h.startOffset = h.offset
 				if tr := fields[15]; len(tr) > 0 {
 					tf, err := protoParse(tr[0].bytes)
 					if err == nil {
 						ts := int64(1000)
-						if v := tf[3]; len(v) > 0 {
+						if v := tf[3]; len(v) > 0 && v[0].varint > 0 && v[0].varint <= math.MaxInt64 {
 							ts = int64(v[0].varint)
 						}
-						if v := tf[1]; len(v) > 0 {
+						if v := tf[1]; len(v) > 0 && v[0].varint <= math.MaxInt64/1000 {
 							h.startMs = int64(v[0].varint) * 1000 / ts
 						}
-						if v := tf[2]; len(v) > 0 {
+						if v := tf[2]; len(v) > 0 && v[0].varint <= math.MaxInt64/1000 {
 							h.durMs = int64(v[0].varint) * 1000 / ts
 						}
 					}
 				}
-				if !h.init {
+				if h.init {
+					if !initMeta.known && h.content > 0 {
+						initMeta.known = true
+						initMeta.offset = h.offset
+						initMeta.length = h.content
+					}
+				} else {
+					if h.seq <= 0 {
+						return errors.New("sabr: invalid segment sequence")
+					}
 					sess.addSegment(h.startMs, h.durMs, h.offset, h.content)
+					if _, exists := segMeta[h.seq]; !exists {
+						segMeta[h.seq] = sabrSegMeta{
+							offset:  h.offset,
+							length:  h.content,
+							startMs: h.startMs,
+							durMs:   h.durMs,
+						}
+					}
 				}
 				headers[h.headerID] = h
 			case umpMedia:
@@ -879,26 +1070,49 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 					continue
 				}
 				chunk := p.payload[n:]
+				if h.content > 0 && int64(len(chunk)) > h.content-h.written {
+					return errors.New("sabr: media chunk exceeds header length")
+				}
 				if h.init {
-					if initBytes == 0 {
-						if err := sess.writeAt(chunk, h.offset); err != nil {
-							return err
+					if initMeta.known && sess.isRangeCovered(initMeta.offset, initMeta.length) {
+						continue
+					}
+					grew, err := sess.writeAt(chunk, h.offset)
+					if err != nil {
+						return err
+					}
+					if grew {
+						progress = true
+					}
+					h.offset += int64(len(chunk))
+					h.written += int64(len(chunk))
+					if initMeta.known {
+						if sess.isRangeCovered(initMeta.offset, initMeta.length) {
+							sess.setInit(initMeta.offset, initMeta.length)
 						}
-						sess.setInit(h.offset, int64(len(chunk)))
-						initBytes = int64(len(chunk))
+					} else if h.written > 0 {
+						sess.setInit(h.startOffset, h.written)
 					}
 					continue
 				}
-				if _, ok := segs[h.seq]; ok {
+				if seg, exists := segMeta[h.seq]; exists && seg.length > 0 && sess.isRangeCovered(seg.offset, seg.length) {
 					continue
 				}
-				if err := sess.writeAt(chunk, h.offset); err != nil {
+				grew, err := sess.writeAt(chunk, h.offset)
+				if err != nil {
 					return err
 				}
+				if grew {
+					progress = true
+				}
 				h.offset += int64(len(chunk))
+				h.written += int64(len(chunk))
 			case umpFormatInit:
 				if fields, err := protoParse(p.payload); err == nil {
 					if v := fields[4]; len(v) > 0 {
+						if v[0].varint > math.MaxInt {
+							return errors.New("sabr: invalid end segment")
+						}
 						endSeg = int(v[0].varint)
 					}
 				}
@@ -922,50 +1136,37 @@ func (c *Client) runSabr(ctx context.Context, s *SabrStream, token string, sess 
 				return fmt.Errorf("%w: %x", errSabrRejected, p.payload)
 			}
 		}
-		for _, h := range headers {
-			if h.init {
-				if initBytes == 0 {
-					initBytes = h.content
-				}
-				continue
+		for {
+			seg, ok := segMeta[lastSeq+1]
+			if !ok || seg.length <= 0 || !sess.isRangeCovered(seg.offset, seg.length) {
+				break
 			}
-			if _, ok := segs[h.seq]; !ok {
-				segs[h.seq] = h.content
-				newSeg = true
-			}
-			if h.seq > lastSeq {
-				lastSeq = h.seq
-			}
-			if end := h.startMs + h.durMs; end > bufEndMs {
+			lastSeq++
+			if end := seg.startMs + seg.durMs; end > bufEndMs {
 				bufEndMs = end
 			}
+			progress = true
 		}
-		if _, ok := segs[1]; ok {
+		initReady := !initMeta.known || sess.isRangeCovered(initMeta.offset, initMeta.length)
+		if lastSeq >= 1 && initReady {
 			sess.signalReady()
 		}
 		playerTimeMs = bufEndMs
-		if redirect != "" && !newSeg {
+		if redirect != "" && !progress {
 			rawURL = redirect
 			continue
 		}
-		if newSeg {
+		if progress {
 			dry = 0
 		} else {
 			dry++
 		}
-		if endSeg > 0 && lastSeq >= endSeg {
+		if endSeg > 0 && lastSeq >= endSeg && sess.isComplete() {
 			break
 		}
 	}
-	if endSeg == 0 || lastSeq < endSeg {
+	if endSeg <= 0 || lastSeq < endSeg || !sess.isComplete() {
 		return fmt.Errorf("sabr: incomplete (%d/%d segments)", lastSeq, endSeg)
-	}
-	var sum int64
-	for _, n := range segs {
-		sum += n
-	}
-	if initBytes+sum != s.Format.ContentLength {
-		return fmt.Errorf("sabr: size mismatch init=%d segments=%d want=%d", initBytes, sum, s.Format.ContentLength)
 	}
 	return nil
 }

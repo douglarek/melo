@@ -101,7 +101,7 @@ func (c *Client) GetNext(ctx context.Context, videoID string, playlistID string)
 							}
 							vID, _ := r["videoId"].(string)
 							tTitle := RunsToString(r["title"])
-							artRuns, _ := r["shortBylineText"].(map[string]any)["runs"].([]any)
+							artRuns := navSlice(r, "shortBylineText", "runs")
 							durText := RunsToString(r["lengthText"])
 							thumbs := ParseThumbnails(r["thumbnail"])
 
@@ -488,7 +488,7 @@ func (c *Client) player(ctx context.Context, payload map[string]any, clientName,
 	req.Header.Set("X-YouTube-Client-Version", clientVersion)
 	c.setPlayerAuth(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpDo(req)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +692,7 @@ func (c *Client) fetchText(ctx context.Context, u string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpDo(req)
 	if err != nil {
 		return "", err
 	}

@@ -5,12 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 var errFMP4 = errors.New("fmp4: malformed box")
 
-// maxFMP4Samples bounds a track run, whose declared count is untrusted.
-const maxFMP4Samples = 65536
+const (
+	// maxFMP4Samples bounds a track run, whose declared count is untrusted.
+	maxFMP4Samples = 65536
+	// maxFMP4MoofSize caps a single box/init allocation from untrusted headers.
+	maxFMP4MoofSize = 16 << 20
+	// maxFMP4SampleSize caps a single AAC access-unit allocation.
+	maxFMP4SampleSize = 1 << 20
+)
 
 // fmp4Init is what the init segment (ftyp + moov) says about the audio.
 type fmp4Init struct {
@@ -29,12 +36,16 @@ func walkBoxes(data []byte, start, end int, fn func(typ string, payload, boxEnd 
 			if pos+16 > end {
 				return errFMP4
 			}
-			size = int(binary.BigEndian.Uint64(data[pos+8:]))
+			raw64 := binary.BigEndian.Uint64(data[pos+8:])
+			if raw64 > math.MaxInt {
+				return errFMP4
+			}
+			size = int(raw64)
 			hdr = 16
 		} else if size == 0 {
 			size = end - pos
 		}
-		if size < hdr || pos+size > end {
+		if size < hdr || size > end-pos {
 			return errFMP4
 		}
 		if err := fn(typ, pos+hdr, pos+size); err != nil {
@@ -171,7 +182,7 @@ func scanDescriptors(data []byte, pos int) []byte {
 		pos++
 		size, n := descriptorLength(data[pos:])
 		pos += n
-		if size < 0 || pos+size > len(data) {
+		if size < 0 || size > len(data)-pos {
 			return nil
 		}
 		body := data[pos : pos+size]
@@ -359,6 +370,9 @@ func parseMoof(data []byte, moofOff, mdatPayload int64, timescale uint32) ([]fmp
 		if du == 0 {
 			du = defDur
 		}
+		if off < 0 || int64(sz) > math.MaxInt64-off {
+			return nil, errFMP4
+		}
 		out = append(out, fmp4Sample{offset: off, size: sz, time: at, dur: du})
 		off += int64(sz)
 		at += int64(du)
@@ -380,6 +394,9 @@ type fmp4Reader struct {
 }
 
 func newFMP4Reader(src io.ReaderAt, total, initOff, initLen int64, seek func(ms int64) (int64, int64, bool)) (*fmp4Reader, error) {
+	if total < 0 || initOff < 0 || initLen <= 0 || initOff > total || initLen > total-initOff || initLen > maxFMP4MoofSize {
+		return nil, errFMP4
+	}
 	buf := make([]byte, initLen)
 	if _, err := src.ReadAt(buf, initOff); err != nil {
 		return nil, err
@@ -400,6 +417,12 @@ func newFMP4Reader(src io.ReaderAt, total, initOff, initLen int64, seek func(ms 
 func (r *fmp4Reader) ASC() []byte { return r.init.asc }
 
 func (r *fmp4Reader) readBoxHeader(pos int64) (typ string, size int64, hdr int64, err error) {
+	if pos < 0 {
+		return "", 0, 0, errFMP4
+	}
+	if pos >= r.total {
+		return "", 0, 0, io.EOF
+	}
 	buf := make([]byte, 16)
 	n, err := r.src.ReadAt(buf, pos)
 	if err != nil && n < 8 {
@@ -412,40 +435,64 @@ func (r *fmp4Reader) readBoxHeader(pos int64) (typ string, size int64, hdr int64
 		if n < 16 {
 			return "", 0, 0, errFMP4
 		}
-		size = int64(binary.BigEndian.Uint64(buf[8:16]))
+		raw64 := binary.BigEndian.Uint64(buf[8:16])
+		if raw64 > math.MaxInt64 {
+			return "", 0, 0, errFMP4
+		}
+		size = int64(raw64)
 		hdr = 16
 	} else if size == 0 {
 		size = r.total - pos
+	}
+	if size < hdr || size > r.total-pos {
+		return "", 0, 0, errFMP4
 	}
 	return typ, size, hdr, nil
 }
 
 func (r *fmp4Reader) fill() error {
 	for len(r.pending) == 0 {
-		typ, size, hdr, err := r.readBoxHeader(r.pos)
-		if err != nil {
+		if r.pos >= r.total {
 			return io.EOF
 		}
-		if size <= 0 {
-			return io.EOF
+		typ, size, hdr, err := r.readBoxHeader(r.pos)
+		if err != nil {
+			return err
 		}
 		switch typ {
 		case "moof":
+			if size-hdr > maxFMP4MoofSize {
+				return errFMP4
+			}
 			moof := make([]byte, size-hdr)
 			if _, err := r.src.ReadAt(moof, r.pos+hdr); err != nil {
 				return err
 			}
 			mdatType, mdatSize, mdatHdr, err := r.readBoxHeader(r.pos + size)
-			if err != nil || mdatType != "mdat" {
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					r.pos += size
+					continue
+				}
+				return err
+			}
+			if mdatType != "mdat" {
 				r.pos += size
 				continue
 			}
 			mdatPayload := r.pos + size + mdatHdr
+			mdatEnd := r.pos + size + mdatSize
 			samples, err := parseMoof(moof, r.pos, mdatPayload, r.init.timescale)
 			if err != nil {
 				return err
 			}
 			for _, s := range samples {
+				if s.size > maxFMP4SampleSize || s.size > math.MaxUint16 {
+					return errFMP4
+				}
+				if s.offset < mdatPayload || s.offset > mdatEnd || int64(s.size) > mdatEnd-s.offset {
+					return errFMP4
+				}
 				if r.targetTime > 0 && s.time+int64(s.dur) <= r.targetTime {
 					continue
 				}

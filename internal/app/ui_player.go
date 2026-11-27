@@ -183,7 +183,7 @@ func (a *app) playerBar(c *ui.Context) {
 					})
 				} else {
 					slider := ui.Slider(c, &posSec, 0, durSec).Grow(1)
-					if slider.Changed() {
+					if slider.Changed() && a.pl.CanSeek() {
 						a.pl.Seek(time.Duration(posSec * float64(time.Second)))
 					}
 				}

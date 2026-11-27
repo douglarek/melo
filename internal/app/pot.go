@@ -128,11 +128,14 @@ const defaultPOUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 // token is minted: one serves the tracks of a session, so WebKit's processes
 // are gone the rest of the time, their 80 MB with them.
 type potProvider struct {
-	// mu guards the window against a close while it opens, and the idle timer.
-	mu    sync.Mutex
-	win   *mygo.Window
-	ready bool
-	idle  *time.Timer
+	// mu guards the window state, closed flag, and idle timer. Never hold mu
+	// while calling synchronous mygo.Window / mygo.Page methods.
+	mu     sync.Mutex
+	win    *mygo.Window
+	page   *mygo.Page
+	ready  bool
+	closed bool
+	idle   *time.Timer
 	// used is when a token was last minted, for the timer that closes a
 	// window that has served its mint.
 	used time.Time
@@ -160,28 +163,58 @@ func potPage() string {
 	return strings.Replace(string(page), `<script src="bgutils.js"></script>`, "<script>"+string(client)+"</script>", 1)
 }
 
+func (p *potProvider) isClosed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closed
+}
+
 // open returns the page of a window that has the token page ready, opening
 // one when none is.
 func (p *potProvider) open(ctx context.Context) (*mygo.Page, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.win != nil && p.ready {
-		return p.win.Page(), nil
+	if p.closed {
+		p.mu.Unlock()
+		return nil, errors.New("pot: provider closed")
 	}
-	if p.win != nil {
-		p.win.Close()
-		p.win = nil
-		p.ready = false
+	if p.win != nil && p.ready && p.page != nil {
+		page := p.page
+		p.mu.Unlock()
+		return page, nil
 	}
+	stale := p.win
+	p.win = nil
+	p.page = nil
+	p.ready = false
+	p.mu.Unlock()
+
+	if stale != nil {
+		stale.Close()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Hidden: true,
 		Width:  480,
 		Height: 360,
 	})
+	if p.isClosed() || ctx.Err() != nil {
+		win.Close()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("pot: provider closed")
+	}
 	page := win.Page()
 	page.LoadHTML(potPage(), "")
 	deadline := time.Now().Add(potReadyLimit)
 	for {
+		if p.isClosed() {
+			win.Close()
+			return nil, errors.New("pot: provider closed")
+		}
 		if err := ctx.Err(); err != nil {
 			win.Close()
 			return nil, err
@@ -195,15 +228,38 @@ func (p *potProvider) open(ctx context.Context) (*mygo.Page, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	p.win, p.ready = win, true
+
+	p.mu.Lock()
+	if p.closed || ctx.Err() != nil {
+		p.mu.Unlock()
+		win.Close()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("pot: provider closed")
+	}
+	prev := p.win
+	p.win = win
+	p.page = page
+	p.ready = true
+	p.mu.Unlock()
+	if prev != nil {
+		prev.Close()
+	}
 	return page, nil
 }
 
 // Token mints a PO token bound to binding, opening the window it needs and
 // closing it once it has served, some time after the mint.
 func (p *potProvider) Token(ctx context.Context, binding string) (string, error) {
+	if p.isClosed() {
+		return "", errors.New("pot: provider closed")
+	}
 	p.mintMu.Lock()
 	defer p.mintMu.Unlock()
+	if p.isClosed() {
+		return "", errors.New("pot: provider closed")
+	}
 	p.stopIdle()
 	page, err := p.open(ctx)
 	if err != nil {
@@ -242,20 +298,29 @@ func (p *potProvider) mint(ctx context.Context, page *mygo.Page, binding string)
 // armIdle closes the window once it has served nothing for potIdle.
 func (p *potProvider) armIdle() {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.win == nil {
+		return
+	}
 	p.used = time.Now()
 	if p.idle != nil {
 		p.idle.Stop()
 	}
 	p.idle = time.AfterFunc(potIdle, p.idleClose)
-	p.mu.Unlock()
 }
 
 // idleClose closes the window if no mint has used it since it was armed: a
 // mint that started meanwhile arms another.
 func (p *potProvider) idleClose() {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	if time.Since(p.used) < potIdle {
-		p.idle.Stop()
+		if p.idle != nil {
+			p.idle.Stop()
+		}
 		p.idle = time.AfterFunc(potIdle-time.Since(p.used), p.idleClose)
 		p.mu.Unlock()
 		return
@@ -264,6 +329,9 @@ func (p *potProvider) idleClose() {
 
 	p.mintMu.Lock()
 	defer p.mintMu.Unlock()
+	if p.isClosed() {
+		return
+	}
 	p.closeWindow()
 }
 
@@ -280,23 +348,40 @@ func (p *potProvider) stopIdle() {
 // with it, a few seconds later.
 func (p *potProvider) closeWindow() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.idle != nil {
 		p.idle.Stop()
 		p.idle = nil
 	}
-	if p.win != nil {
-		log.Print("pot: closing the token window")
-		p.win.Close()
-		p.win = nil
-	}
+	win := p.win
+	p.win = nil
+	p.page = nil
 	p.ready = false
+	p.mu.Unlock()
+
+	if win != nil {
+		log.Print("pot: closing the token window")
+		win.Close()
+	}
 }
 
 // close closes the window for good, as the app quits.
 func (p *potProvider) close() {
-	p.stopIdle()
-	p.closeWindow()
+	p.mu.Lock()
+	p.closed = true
+	if p.idle != nil {
+		p.idle.Stop()
+		p.idle = nil
+	}
+	win := p.win
+	p.win = nil
+	p.page = nil
+	p.ready = false
+	p.mu.Unlock()
+
+	if win != nil {
+		log.Print("pot: closing the token window")
+		win.Close()
+	}
 }
 
 var _ ytmusic.POTProvider = (*potProvider)(nil)

@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +37,8 @@ type Client struct {
 	language   string
 	region     string
 	cookie     string
+	authOwner  string
+	authGen    uint64
 	sabrTokens POTProvider
 	sabrDir    string
 	// sabrCred is the visitor the SABR path speaks as and its PO token, one
@@ -64,7 +68,53 @@ func NewClient() *Client {
 func (c *Client) SetAuth(cookie string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setAuthLocked(cookie)
+}
+
+func (c *Client) setAuthLocked(cookie string) {
 	c.cookie = cookie
+	c.authOwner = cookie
+	c.authGen++
+}
+
+// Cookie returns the client's current session cookie.
+func (c *Client) Cookie() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cookie
+}
+
+func (c *Client) httpDo(req *http.Request) (*http.Response, error) {
+	c.mu.RLock()
+	hc := c.httpClient
+	c.mu.RUnlock()
+	return hc.Do(req)
+}
+
+func (c *Client) httpTransport() http.RoundTripper {
+	c.mu.RLock()
+	hc := c.httpClient
+	c.mu.RUnlock()
+	if hc == nil {
+		return nil
+	}
+	return hc.Transport
+}
+
+// SetTestTransport replaces the client's HTTP transport for tests and returns
+// a function that restores the previous HTTP client.
+func (c *Client) SetTestTransport(rt http.RoundTripper) func() {
+	c.mu.Lock()
+	prev := c.httpClient
+	clone := *prev
+	clone.Transport = rt
+	c.httpClient = &clone
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		c.httpClient = prev
+		c.mu.Unlock()
+	}
 }
 
 // SetLanguage sets the preferred language.
@@ -81,13 +131,16 @@ func (c *Client) post(ctx context.Context, endpoint string, body map[string]any,
 // postWithClient performs a request with an optional client context override
 // and user agent. A nil override uses the WEB_REMIX client.
 func (c *Client) postWithClient(ctx context.Context, endpoint string, body map[string]any, q url.Values, clientOverride map[string]any, userAgent string) ([]byte, error) {
-	sessionGen, hasSession := sessionGeneration()
-
+	sessionMu.RLock()
+	sGen, hasSession := sessionGen, currentSession != nil
 	c.mu.RLock()
+	hc := c.httpClient
 	lang := c.language
 	reg := c.region
 	cookie := c.cookie
+	authGen := c.authGen
 	c.mu.RUnlock()
+	sessionMu.RUnlock()
 
 	if q == nil {
 		q = url.Values{}
@@ -147,28 +200,15 @@ func (c *Client) postWithClient(ctx context.Context, endpoint string, body map[s
 		req.Header.Set("Cookie", cookieHeader)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// Merge refreshed cookies when the request's session generation is current.
+	// Merge refreshed cookies when the request's auth/session generation is current.
 	if setCookies := resp.Cookies(); len(setCookies) > 0 && cookie != "" {
-		newCookie := mergeCookies(cookie, setCookies)
-		if newCookie != cookie {
-			applied := true
-			if hasSession {
-				applied = UpdateSessionCookie(sessionGen, newCookie) == nil
-			}
-			if applied {
-				c.mu.Lock()
-				if c.cookie == cookie {
-					c.cookie = newCookie
-				}
-				c.mu.Unlock()
-			}
-		}
+		c.applyRefreshedCookies(setCookies, cookie, authGen, sGen, hasSession)
 	}
 
 	if resp.StatusCode >= 400 {
@@ -350,8 +390,35 @@ func mergeCookies(existing string, setCookies []*http.Cookie) string {
 		}
 	}
 	var parts []string
-	for k, v := range cookieMap {
-		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+	for _, k := range slices.Sorted(maps.Keys(cookieMap)) {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, cookieMap[k]))
 	}
 	return strings.Join(parts, "; ")
+}
+
+func asMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+func navMap(m map[string]any, keys ...string) map[string]any {
+	for _, k := range keys {
+		if m == nil {
+			return nil
+		}
+		m, _ = m[k].(map[string]any)
+	}
+	return m
+}
+
+func navSlice(m map[string]any, keys ...string) []any {
+	if len(keys) == 0 {
+		return nil
+	}
+	parent := navMap(m, keys[:len(keys)-1]...)
+	if parent == nil {
+		return nil
+	}
+	s, _ := parent[keys[len(keys)-1]].([]any)
+	return s
 }

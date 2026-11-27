@@ -107,7 +107,13 @@ func (a *app) saveLibraryCache() {
 		*liked = *pl
 	}
 	liked.Tracks = append([]ytmusic.Track(nil), a.liked...)
-	liked.TrackCount = len(a.liked)
+	if liked.Continuation == "" {
+		if liked.TrackCount == 0 || liked.TrackCount < len(a.liked) {
+			liked.TrackCount = len(a.liked)
+		}
+	} else if liked.TrackCount > 0 && len(a.liked) >= liked.TrackCount {
+		liked.TrackCount = 0
+	}
 
 	cache := libraryCache{
 		Playlists: a.libraryPlaylists,
