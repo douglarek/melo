@@ -261,6 +261,11 @@ func (a *app) post(fn func()) {
 
 // Run boots the application and launches the main window.
 func Run() error {
+	// claim the lock before initialising plugins, services or UI so a second
+	// launch hands over and exits fast
+	if !mygo.App.RequestSingleInstanceLock() {
+		return nil
+	}
 	useUpdatePlugin()
 	mygo.Bind(&Pot{client: newPotClient()})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -280,6 +285,12 @@ func Run() error {
 		loadingMore: map[string]bool{},
 		route:       route{page: pageHome},
 	}
+
+	// runs on the main thread inside WithActivationToken, so raising here
+	// keeps the launcher's Wayland focus token
+	mygo.App.OnSecondInstance(func([]string, string) {
+		a.raiseWindow()
+	})
 
 	mygo.App.WhenReady(func() {
 		secureUserDataDir()
@@ -422,6 +433,26 @@ func Run() error {
 		}
 	}
 	return err
+}
+
+// raiseWindow brings the window the user was last in back into view, without
+// touching playback or navigation: the login window while it is the one open,
+// the main window otherwise.
+func (a *app) raiseWindow() {
+	w := a.loginWin
+	if w == nil || w.IsDestroyed() || !w.IsVisible() {
+		w = a.win
+	}
+	if w == nil || w.IsDestroyed() {
+		return
+	}
+	if !w.IsVisible() {
+		w.Show()
+	}
+	if w.IsMinimized() {
+		w.Restore()
+	}
+	w.Focus()
 }
 
 func (a *app) boot() {
